@@ -8,6 +8,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -67,6 +68,7 @@ fun ShortsScreen(vm: MainVM) {
         pageCount = { vm.shorts.size },
     )
     val page = pager.currentPage
+    val activeVideo = vm.shorts.getOrNull(page)
     val player = rememberServicePlayer { }
     val active = vm.tab == 1 && vm.playing == null && !vm.showLogin
     var quality by remember { mutableIntStateOf(Prefs.quality) }
@@ -302,10 +304,10 @@ fun ShortsScreen(vm: MainVM) {
                     }
                 }
             }
-            LaunchedEffect(video.id) {
+            LaunchedEffect(activeVideo?.id) {
                 commentsLoading = true
                 commentsError = null
-                try { comments = InnerTube.comments(video.id) }
+                try { comments = activeVideo?.let { InnerTube.comments(it.id) }.orEmpty() }
                 catch (e: CancellationException) { throw e }
                 catch (e: Throwable) { commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi" }
                 commentsLoading = false
