@@ -7,10 +7,15 @@ import android.content.pm.ActivityInfo
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Comment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +33,8 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.ui.PlayerView
 import com.cleantube.app.data.HttpDownloader
+import com.cleantube.app.data.CommentItem
+import com.cleantube.app.data.InnerTube
 import com.cleantube.app.data.Prefs
 import com.cleantube.app.data.Repo
 import com.cleantube.app.data.Video
@@ -45,6 +52,10 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     val maxH = Prefs.heightFor(qualitySel)
     var full by remember { mutableStateOf(false) }
     var showQ by remember { mutableStateOf(false) }
+    var showComments by remember { mutableStateOf(false) }
+    var comments by remember(video.id) { mutableStateOf<List<CommentItem>>(emptyList()) }
+    var commentsLoading by remember(video.id) { mutableStateOf(false) }
+    var commentsError by remember(video.id) { mutableStateOf<String?>(null) }
     var loadedFor by remember { mutableStateOf<String?>(null) }
     val fb = remember { SourceChain() }
 
@@ -181,6 +192,11 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                             val sub = listOfNotNull(i?.uploaderName ?: video.channel, i?.viewCount?.takeIf { it >= 0 }?.let { fmtViews(it) })
                                 .filter { it.isNotBlank() }.joinToString(" • ")
                             Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = { showComments = true }) {
+                                Icon(Icons.Filled.Comment, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Yorumları gör")
+                            }
                             TextButton(onClick = { showQ = true }) {
                                 Text("Kalite: " + if (qualitySel == 0) "Otomatik (${Prefs.AUTO_HEIGHT}p)" else "${qualitySel}p")
                             }
@@ -199,6 +215,43 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 onSelect = { Prefs.quality = it; qualitySel = it; showQ = false },
                 onDismiss = { showQ = false },
             )
+        }
+        if (showComments) {
+            ModalBottomSheet(onDismissRequest = { showComments = false }) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Text("Yorumlar", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(12.dp))
+                    when {
+                        commentsLoading -> Box(Modifier.fillMaxWidth().height(120.dp), Alignment.Center) { CircularProgressIndicator() }
+                        commentsError != null -> Text(commentsError!!, color = MaterialTheme.colorScheme.error)
+                        comments.isEmpty() -> Text("Bu video için herkese açık yorum bulunamadı.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                            items(comments, key = { it.id }) { comment ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Top) {
+                                    AsyncImage(comment.avatar.ifBlank { "https://www.youtube.com/s/desktop/12f6b690/img/favicon_144x144.png" }, null,
+                                        Modifier.size(36.dp).clip(CircleShape))
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(comment.author, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(comment.text, fontSize = 14.sp, lineHeight = 19.sp)
+                                        if (comment.likes.isNotBlank()) Text("♡ ${comment.likes}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(video.id) {
+                    commentsLoading = true
+                    commentsError = null
+                    try { comments = InnerTube.comments(video.id) }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Throwable) { commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi" }
+                    commentsLoading = false
+                }
+            }
         }
     }
 }
