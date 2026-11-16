@@ -16,10 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Comment
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -218,10 +214,10 @@ fun ShortsScreen(vm: MainVM) {
                         Icon(if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "Beğen", tint = Color.White)
                     }) { liked = !liked }
                     Spacer(Modifier.height(8.dp))
-                    ShortAction("Yorum", { Icon(Icons.Filled.Comment, "Yorumlar", tint = Color.White) }) { showComments = true }
+                    ShortAction("Yorum", { Text("☰", color = Color.White, fontSize = 23.sp) }) { showComments = true }
                     Spacer(Modifier.height(8.dp))
                     ShortAction(if (saved) "Kaydedildi" else "Kaydet", {
-                        Icon(if (saved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder, "Kaydet", tint = Color.White)
+                        Text(if (saved) "▣" else "▢", color = Color.White, fontSize = 23.sp)
                     }) { saved = !saved }
                     Spacer(Modifier.height(8.dp))
                     ShortAction("Paylaş", { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }) {
