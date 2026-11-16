@@ -15,6 +15,8 @@ android {
     buildTypes {
         // Debug anahtariyla imzalanir ama debuggable KAPALI (adb ile veri okunamasin).
         debug { isDebuggable = false }
+        // Yalnizca CI emulator testi icin: debug + test alicisi (src/ci). Teslim edilen APK bu degil.
+        create("ci") { initWith(getByName("debug")); isDebuggable = false }
         release { isMinifyEnabled = false }
     }
     compileOptions {

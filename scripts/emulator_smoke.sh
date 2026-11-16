@@ -42,8 +42,21 @@ tap_text "ullscreen" && { sleep 3; echo "[tamekran] rotasyon: $(adb shell dumpsy
 alive "son"
 adb shell input keyevent 4; sleep 2; alive "geri"; texts "07_after_back"
 
+# ---- Medya hatti testi (YouTube'dan bagimsiz): CI derlemesi + ornek akislar ----
+CIAPK=app/build/outputs/apk/ci/app-ci.apk
+if [ -f "$CIAPK" ]; then
+  adb shell am force-stop $PKG; adb install -r "$CIAPK" 2>&1 | tail -1; adb logcat -c
+  adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 6
+  play() { adb shell am broadcast -n $PKG/.ci.CiPlayReceiver --es kind "$1" --es url "$2" >/dev/null 2>&1; sleep 28; alive "medya-$1"; }
+  play progressive "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4"
+  play hls "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8"
+  play dash "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd"
+  echo "[medya] MEDIA_SESSION: $(adb shell dumpsys media_session | grep -m2 -E 'state=PlaybackState' | cut -c1-160)"
+  adb logcat -d -v threadtime | grep -E "VYROCI" | cut -c1-260
+fi
+
 adb logcat -d -b crash > "$OUT/crash.txt" 2>&1
 adb logcat -d -v threadtime > "$OUT/full.txt" 2>&1
-grep -E "VYRO|FATAL|AndroidRuntime" "$OUT/full.txt" | cut -c1-300 | head -60
+echo "--- VYRO uygulama loglari ---"; grep -E " (VYRO|VYRO\.[A-Za-z]+) *:| FATAL " "$OUT/full.txt" | cut -c1-300 | head -40
 echo "=== crash buffer ==="; head -60 "$OUT/crash.txt" | cut -c1-260
 exit 0

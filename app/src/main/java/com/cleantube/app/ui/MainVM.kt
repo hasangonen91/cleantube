@@ -61,18 +61,23 @@ class MainVM : ViewModel() {
     }
 
     fun loadShorts() = viewModelScope.launch(safe) {
-        if (shorts.isNotEmpty()) return@launch
+        if (shorts.isNotEmpty() || shortsLoading) return@launch
         shortsLoading = true
-        try {
-            shorts = Repo.search("YouTube Shorts popüler").filter {
-                val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
-                    .fold(0L) { total, part -> total * 60 + part }
-                seconds in 1..180
-            }.take(30)
-        } catch (e: CancellationException) { throw e } catch (e: Throwable) {
-            Log.w("VYRO", "Shorts yüklenemedi", e)
-            shorts = emptyList()
+        val found = LinkedHashMap<String, Video>()
+        // Tek sorgu bos donebilir; sirayla birkac sorgu deneyip kisa videolari (<=3 dk) topla.
+        for (q in listOf("#shorts", "shorts popüler", "#shorts komik", "#shorts müzik", "#shorts oyun")) {
+            try {
+                Repo.search(q).forEach { v ->
+                    val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull).fold(0L) { total, part -> total * 60 + part }
+                    if (seconds in 1..180) found.putIfAbsent(v.id, v)
+                }
+            } catch (e: CancellationException) { throw e } catch (e: Throwable) {
+                Log.w("VYRO", "Shorts sorgusu basarisiz: $q", e)
+            }
+            if (found.size >= 24) break
         }
+        shorts = found.values.take(30)
+        Log.i("VYRO", "Shorts yuklendi: ${shorts.size}")
         shortsLoading = false
     }
 
