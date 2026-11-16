@@ -3,8 +3,10 @@
 package com.cleantube.app.ui
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,11 +32,15 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.media3.ui.PlayerView
 import com.cleantube.app.data.HttpDownloader
 import com.cleantube.app.data.Repo
 import com.cleantube.app.data.Video
 import com.cleantube.app.data.fmtViews
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import com.cleantube.app.player.PlaybackService
 import org.schabi.newpipe.extractor.stream.StreamInfo
@@ -51,9 +57,23 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     var loadedFor by remember { mutableStateOf<String?>(null) }
 
     var player by remember { mutableStateOf<ExoPlayer?>(null) }
+    val fb = remember { SourceChain() }
+
+    // Servise MediaController (SessionToken) ile baglan. Servisi bu baglanti ayakta tutar;
+    // ekran kapaninca yalnizca controller birakilir, oynatici release EDILMEZ.
+    DisposableEffect(Unit) {
+        var future: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
+        try {
+            val token = SessionToken(ctx, ComponentName(ctx, PlaybackService::class.java))
+            future = MediaController.Builder(ctx, token).buildAsync()
+        } catch (t: Throwable) {
+            Log.w("VYRO", "MediaController baglanamadi, servis dogrudan baslatiliyor", t)
+            try { ctx.startService(Intent(ctx, PlaybackService::class.java)) } catch (t2: Throwable) { Log.w("VYRO", "Servis baslatilamadi", t2) }
+        }
+        onDispose { future?.let { runCatching { MediaController.releaseFuture(it) } } }
+    }
     LaunchedEffect(Unit) {
-        ContextCompat.startForegroundService(ctx, Intent(ctx, PlaybackService::class.java))
-        repeat(60) {
+        repeat(100) {
             PlaybackService.sharedPlayer?.let {
                 player = it
                 it.playWhenReady = true
@@ -65,13 +85,24 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     }
     val activePlayer = player
     if (activePlayer == null) {
-        Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+        Box(Modifier.fillMaxSize(), Alignment.Center) {
+            if (error == null) CircularProgressIndicator() else Text(error!!, Modifier.padding(16.dp))
+        }
+        BackHandler { vm.playing = null }
         return
+    }
+    // Video kapatilinca (ekran kompozisyondan cikinca) oynatmayi durdur; oynatici servisin, release ETME.
+    DisposableEffect(activePlayer) {
+        onDispose { runCatching { activePlayer.stop(); activePlayer.clearMediaItems() } }
     }
     DisposableEffect(activePlayer) {
         val listener = object : Player.Listener {
             override fun onPlayerError(playbackError: PlaybackException) {
-                error = playbackError.localizedMessage ?: "Video akışı oynatılamadı"
+                Log.w("VYRO", "Oynatma hatasi: ${playbackError.errorCodeName}", playbackError)
+                // Guvenilir fallback: siradaki kaynagi dene; hepsi tukenirse mesaj goster.
+                if (!fb.tryNext(activePlayer)) {
+                    error = playbackError.localizedMessage ?: "Video akışı oynatılamadı"
+                }
             }
         }
         activePlayer.addListener(listener)
@@ -98,9 +129,11 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     }
 
     LaunchedEffect(video.id) {
-        info = null; error = null
-        activePlayer.stop(); activePlayer.clearMediaItems()
-        try { info = Repo.resolve(video.id) } catch (e: Exception) { error = e.message ?: "Video açılamadı" }
+        info = null; error = null; loadedFor = null
+        runCatching { activePlayer.stop(); activePlayer.clearMediaItems() }
+        try { info = Repo.resolve(video.id) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Throwable) { Log.w("VYRO", "Video cozulemedi", e); error = e.message ?: "Video açılamadı" }
     }
     LaunchedEffect(info, maxH) {
         val i = info ?: return@LaunchedEffect
@@ -111,17 +144,18 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(20_000)
                 .setReadTimeoutMs(30_000)
-            val src = Repo.buildSource(i, maxH, factory)
-            if (src == null) {
+            val list = Repo.candidates(i, maxH, factory)
+            if (list.isEmpty()) {
                 error = "Bu video için uyumlu bir akış bulunamadı."
                 return@LaunchedEffect
             }
-            activePlayer.setMediaSource(src)
-            activePlayer.prepare()
-            if (keepPos > 0) activePlayer.seekTo(keepPos)
-            activePlayer.playWhenReady = true
+            error = null
+            fb.reset(list, keepPos)
+            fb.tryNext(activePlayer)
             loadedFor = video.id
-        } catch (e: Exception) {
+        } catch (e: CancellationException) { throw e }
+        catch (e: Throwable) {
+            Log.w("VYRO", "Video hazirlanamadi", e)
             error = e.localizedMessage ?: "Video hazırlanırken hata oluştu."
         }
     }
@@ -178,5 +212,31 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 }
             }
         }
+    }
+}
+
+/** Siradaki oynatma kaynagini deneyen basit zincir (progressive -> birlestirme -> DASH -> HLS). */
+private class SourceChain {
+    private var items: List<() -> MediaSource> = emptyList()
+    private var idx = 0
+    private var startPos = 0L
+
+    fun reset(list: List<() -> MediaSource>, pos: Long) { items = list; idx = 0; startPos = pos }
+
+    /** true: bir kaynak denendi. false: aday kalmadi. */
+    fun tryNext(p: ExoPlayer): Boolean {
+        while (idx < items.size) {
+            val make = items[idx++]
+            try {
+                p.setMediaSource(make())
+                p.prepare()
+                if (startPos > 0) p.seekTo(startPos)
+                p.playWhenReady = true
+                return true
+            } catch (e: Throwable) {
+                Log.w("VYRO", "Kaynak olusturulamadi, siradaki deneniyor", e)
+            }
+        }
+        return false
     }
 }

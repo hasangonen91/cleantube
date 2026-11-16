@@ -6,6 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cleantube.app.data.*
+import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.launch
 
 class MainVM : ViewModel() {
@@ -33,20 +36,31 @@ class MainVM : ViewModel() {
     var libLoading by mutableStateOf(false)
     var libError by mutableStateOf<String?>(null)
 
+    /** Hicbir coroutine hatasi (Exception veya Error) uygulamanin ana surecini dusurmesin. */
+    private val safe = CoroutineExceptionHandler { _, t -> Log.e("VYRO", "Yakalanmamis coroutine hatasi", t) }
+
+    private fun friendly(t: Throwable, fallback: String): String {
+        Log.w("VYRO", fallback, t)
+        return when (t) {
+            is java.io.IOException -> "İnternet bağlantısı yok veya sunucuya ulaşılamadı."
+            else -> t.message?.takeIf { it.isNotBlank() }?.let { "$fallback ($it)" } ?: fallback
+        }
+    }
+
     init { loadHome(); loadShorts() }
 
-    fun loadHome() = viewModelScope.launch {
+    fun loadHome() = viewModelScope.launch(safe) {
         categoryIndex = 0
         homeLoading = true; homeError = null
         try {
             home = if (Auth.loggedIn) {
                 runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Repo.trending()
             } else Repo.trending()
-        } catch (e: Exception) { homeError = e.message ?: "Yüklenemedi" }
+        } catch (e: CancellationException) { throw e } catch (e: Throwable) { homeError = friendly(e, "Yüklenemedi") }
         homeLoading = false
     }
 
-    fun loadShorts() = viewModelScope.launch {
+    fun loadShorts() = viewModelScope.launch(safe) {
         if (shorts.isNotEmpty()) return@launch
         shortsLoading = true
         try {
@@ -55,17 +69,18 @@ class MainVM : ViewModel() {
                     .fold(0L) { total, part -> total * 60 + part }
                 seconds in 1..180
             }.take(30)
-        } catch (_: Exception) {
+        } catch (e: CancellationException) { throw e } catch (e: Throwable) {
+            Log.w("VYRO", "Shorts yüklenemedi", e)
             shorts = emptyList()
         }
         shortsLoading = false
     }
 
-    fun search() = viewModelScope.launch {
+    fun search() = viewModelScope.launch(safe) {
         val q = query.trim()
         if (q.isEmpty()) return@launch
         searching = true; searchError = null
-        try { results = Repo.search(q) } catch (e: Exception) { searchError = e.message ?: "Arama başarısız" }
+        try { results = Repo.search(q) } catch (e: CancellationException) { throw e } catch (e: Throwable) { searchError = friendly(e, "Arama başarısız") }
         searching = false
     }
 
@@ -73,11 +88,11 @@ class MainVM : ViewModel() {
         section = s
         libVideos = emptyList(); libPlaylists = emptyList(); libError = null
         if (s == null) return
-        viewModelScope.launch {
+        viewModelScope.launch(safe) {
             libLoading = true
             try {
                 if (s.isPlaylists) libPlaylists = InnerTube.playlists() else libVideos = InnerTube.videos(s.browseId)
-            } catch (e: Exception) { libError = e.message ?: "Yüklenemedi" }
+            } catch (e: CancellationException) { throw e } catch (e: Throwable) { libError = friendly(e, "Yüklenemedi") }
             libLoading = false
         }
     }
