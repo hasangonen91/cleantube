@@ -24,7 +24,9 @@ adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8;  alive "t+8s"
 sleep 12; alive "t+20s"; texts "01_home"
 
-tap_text "Shorts" ; sleep 6; alive "shorts"; texts "02_shorts"
+tap_text "Shorts" ; sleep 8; alive "shorts"; texts "02_shorts"
+adb shell input swipe 540 1700 540 500 300; sleep 6; alive "shorts-kaydir"; texts "02b_shorts_swipe"
+adb shell input tap 540 1000; sleep 1; texts "02c_shorts_tap"
 tap_text "Ara";     sleep 2
 dump; xy=$(python3 scripts/ui_tap.py "$UI" edit) && adb shell input tap $xy; sleep 1
 adb shell input text "music"; sleep 1; adb shell input keyevent 66
@@ -34,7 +36,10 @@ dump; xy=$(python3 scripts/ui_tap.py "$UI" card) && { echo "ILK SONUCA TAP -> $x
 sleep 25; alive "video"; texts "04_player"
 echo "[video] MEDIA_SESSION: $(adb shell dumpsys media_session | grep -m3 -E 'state=PlaybackState' | cut -c1-200)"
 
-# kalite menusu
+# ayar/kalite menusu (oynatici ust basligindaki disli)
+adb shell input tap 540 450; sleep 1
+tap_text "Ayarlar" && { sleep 2; texts "05_settings_sheet"; dump; xy=$(python3 scripts/ui_tap.py "$UI" tap "360p") && adb shell input tap $xy; sleep 3; alive "kalite-secildi"; texts "06_after_quality"; }
+# eski kalite dugmesi
 tap_text "Kalite" && { sleep 1; texts "05_quality_menu"; dump; xy=$(python3 scripts/ui_tap.py "$UI" tap "360p") && adb shell input tap $xy; sleep 8; alive "kalite"; texts "06_after_quality"; }
 # tam ekran (kontroller gorunsun diye once oynaticiya dokun)
 adb shell input tap 540 450; sleep 1

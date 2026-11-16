@@ -3,46 +3,36 @@
 package com.cleantube.app.ui
 
 import android.app.Activity
-import android.content.ComponentName
-import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.MediaSource
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
 import androidx.media3.ui.PlayerView
 import com.cleantube.app.data.HttpDownloader
+import com.cleantube.app.data.Prefs
 import com.cleantube.app.data.Repo
 import com.cleantube.app.data.Video
 import com.cleantube.app.data.fmtViews
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
-import com.cleantube.app.player.PlaybackService
 import org.schabi.newpipe.extractor.stream.StreamInfo
 
 @Composable
@@ -51,39 +41,14 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     val activity = ctx as? Activity
     var info by remember(video.id) { mutableStateOf<StreamInfo?>(null) }
     var error by remember(video.id) { mutableStateOf<String?>(null) }
-    var maxH by remember { mutableIntStateOf(720) }
+    var qualitySel by remember { mutableIntStateOf(Prefs.quality) }
+    val maxH = Prefs.heightFor(qualitySel)
     var full by remember { mutableStateOf(false) }
     var showQ by remember { mutableStateOf(false) }
     var loadedFor by remember { mutableStateOf<String?>(null) }
-
-    var player by remember { mutableStateOf<ExoPlayer?>(null) }
     val fb = remember { SourceChain() }
 
-    // Servise MediaController (SessionToken) ile baglan. Servisi bu baglanti ayakta tutar;
-    // ekran kapaninca yalnizca controller birakilir, oynatici release EDILMEZ.
-    DisposableEffect(Unit) {
-        var future: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
-        try {
-            val token = SessionToken(ctx, ComponentName(ctx, PlaybackService::class.java))
-            future = MediaController.Builder(ctx, token).buildAsync()
-        } catch (t: Throwable) {
-            Log.w("VYRO", "MediaController baglanamadi, servis dogrudan baslatiliyor", t)
-            try { ctx.startService(Intent(ctx, PlaybackService::class.java)) } catch (t2: Throwable) { Log.w("VYRO", "Servis baslatilamadi", t2) }
-        }
-        onDispose { future?.let { runCatching { MediaController.releaseFuture(it) } } }
-    }
-    LaunchedEffect(Unit) {
-        repeat(100) {
-            PlaybackService.sharedPlayer?.let {
-                player = it
-                it.playWhenReady = true
-                return@LaunchedEffect
-            }
-            delay(50)
-        }
-        error = "Medya servisi başlatılamadı"
-    }
-    val activePlayer = player
+    val activePlayer = rememberServicePlayer { error = it }
     if (activePlayer == null) {
         Box(Modifier.fillMaxSize(), Alignment.Center) {
             if (error == null) CircularProgressIndicator() else Text(error!!, Modifier.padding(16.dp))
@@ -91,7 +56,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         BackHandler { vm.playing = null }
         return
     }
-    // Video kapatilinca (ekran kompozisyondan cikinca) oynatmayi durdur; oynatici servisin, release ETME.
+    // Video kapatilinca oynatmayi durdur; oynatici servisin, release ETME.
     DisposableEffect(activePlayer) {
         onDispose { runCatching { activePlayer.stop(); activePlayer.clearMediaItems() } }
     }
@@ -130,8 +95,12 @@ fun PlayerScreen(vm: MainVM, video: Video) {
 
     LaunchedEffect(video.id) {
         info = null; error = null; loadedFor = null
-        runCatching { activePlayer.stop(); activePlayer.clearMediaItems() }
-        try { info = Repo.resolve(video.id) }
+        runCatching {
+            activePlayer.stop(); activePlayer.clearMediaItems()
+            activePlayer.repeatMode = Player.REPEAT_MODE_OFF
+            activePlayer.volume = 1f
+        }
+        try { info = vm.streamInfo(video.id) }
         catch (e: CancellationException) { throw e }
         catch (e: Throwable) { Log.w("VYRO", "Video cozulemedi", e); error = e.message ?: "Video açılamadı" }
     }
@@ -166,22 +135,43 @@ fun PlayerScreen(vm: MainVM, video: Video) {
             modifier = m,
             factory = { c ->
                 PlayerView(c).apply {
-                    this.player = activePlayer; keepScreenOn = true
-                    setFullscreenButtonClickListener { full = !full }
+                    this.player = activePlayer
+                    useController = false
+                    keepScreenOn = true
                 }
             },
+        )
+    }
+    val overlay: @Composable (Modifier) -> Unit = { m ->
+        PlayerOverlay(
+            player = activePlayer, full = full,
+            onClose = { if (full) full = false else vm.playing = null },
+            onFullscreen = { full = !full },
+            onSettings = { showQ = true },
+            onNext = { info?.let { Repo.related(it).firstOrNull() }?.let { vm.playing = it } },
+            modifier = m,
         )
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (full) {
-            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) { playerView(Modifier.fillMaxSize()) }
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                playerView(Modifier.fillMaxSize())
+                overlay(Modifier.fillMaxSize())
+            }
         } else {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(androidx.compose.ui.graphics.Color.Black)) {
+                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
                     playerView(Modifier.fillMaxSize())
+                    overlay(Modifier.fillMaxSize())
                     if (info == null && error == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
-                    error?.let { Text(it, Modifier.align(Alignment.Center).padding(16.dp)) }
+                    error?.let {
+                        Text(
+                            it, color = Color.White, fontSize = 13.sp,
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp, start = 16.dp, end = 16.dp)
+                                .background(Color(0xCC000000)).padding(8.dp),
+                        )
+                    }
                 }
                 val i = info
                 LazyColumn(Modifier.fillMaxSize()) {
@@ -191,18 +181,8 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                             val sub = listOfNotNull(i?.uploaderName ?: video.channel, i?.viewCount?.takeIf { it >= 0 }?.let { fmtViews(it) })
                                 .filter { it.isNotBlank() }.joinToString(" • ")
                             Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { vm.playing = null }) { Icon(Icons.Filled.ArrowBack, "Kapat") }
-                                if (i != null) {
-                                    Box {
-                                        TextButton(onClick = { showQ = true }) { Text("Kalite: ${maxH}p") }
-                                        DropdownMenu(showQ, { showQ = false }) {
-                                            Repo.qualities(i).forEach { q ->
-                                                DropdownMenuItem(text = { Text("${q}p") }, onClick = { maxH = q; showQ = false })
-                                            }
-                                        }
-                                    }
-                                }
+                            TextButton(onClick = { showQ = true }) {
+                                Text("Kalite: " + if (qualitySel == 0) "Otomatik (${Prefs.AUTO_HEIGHT}p)" else "${qualitySel}p")
                             }
                         }
                     }
@@ -212,31 +192,13 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 }
             }
         }
-    }
-}
-
-/** Siradaki oynatma kaynagini deneyen basit zincir (progressive -> birlestirme -> DASH -> HLS). */
-private class SourceChain {
-    private var items: List<() -> MediaSource> = emptyList()
-    private var idx = 0
-    private var startPos = 0L
-
-    fun reset(list: List<() -> MediaSource>, pos: Long) { items = list; idx = 0; startPos = pos }
-
-    /** true: bir kaynak denendi. false: aday kalmadi. */
-    fun tryNext(p: ExoPlayer): Boolean {
-        while (idx < items.size) {
-            val make = items[idx++]
-            try {
-                p.setMediaSource(make())
-                p.prepare()
-                if (startPos > 0) p.seekTo(startPos)
-                p.playWhenReady = true
-                return true
-            } catch (e: Throwable) {
-                Log.w("VYRO", "Kaynak olusturulamadi, siradaki deneniyor", e)
-            }
+        if (showQ) {
+            QualitySheet(
+                options = info?.let { Repo.qualities(it) }?.takeIf { it.isNotEmpty() } ?: Prefs.DEFAULT_QUALITIES,
+                selected = qualitySel,
+                onSelect = { Prefs.quality = it; qualitySel = it; showQ = false },
+                onDismiss = { showQ = false },
+            )
         }
-        return false
     }
 }

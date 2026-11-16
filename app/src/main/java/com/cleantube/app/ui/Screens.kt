@@ -11,6 +11,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -154,40 +155,12 @@ private fun ShortsShelf(vm: MainVM) {
             TextButton(onClick = { vm.tab = 1 }) { Text("Tümünü gör") }
         }
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(vm.shorts.take(12), key = { it.id }) { video ->
-                Column(Modifier.width(154.dp).clickable { vm.playing = video }) {
+            itemsIndexed(vm.shorts.take(12), key = { _, v -> v.id }) { index, video ->
+                Column(Modifier.width(154.dp).clickable { vm.openShorts(index) }) {
                     AsyncImage(video.thumb, null, Modifier.fillMaxWidth().height(238.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
                     Spacer(Modifier.height(7.dp))
                     Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text(video.channel, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun ShortsScreen(vm: MainVM) {
-    if (vm.shorts.isEmpty()) {
-        if (vm.shortsLoading) Loading() else ErrorView("Shorts şu an yüklenemedi.", { vm.loadShorts() })
-        return
-    }
-    val pager = rememberPagerState(pageCount = { vm.shorts.size })
-    VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        val video = vm.shorts[page]
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(20.dp)) {
-                Text(video.channel, color = Color.White, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(6.dp))
-                Text(video.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { vm.playing = video }, shape = RoundedCornerShape(24.dp)) {
-                    Icon(Icons.Filled.PlayArrow, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("İzle")
                 }
             }
         }

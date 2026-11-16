@@ -1,8 +1,11 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.cleantube.app.player
 
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -20,7 +23,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        // Kucuk tampon: gereksiz on-yukleme yapmaz, internet tuketimini dusurur.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 30_000, 1_500, 3_000)
+            .build()
         val exoPlayer = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 /* handleAudioFocus = */ true,

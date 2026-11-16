@@ -81,23 +81,23 @@ object Repo {
             ?: info.videoStreams.progressive().minByOrNull { it.height }
         val videoOnly = info.videoOnlyStreams.progressive().filter { it.height in 1..maxHeight }
         val audioOnly = info.audioStreams.progressive()
+        // Veri tasarrufu: ~130 kbps ve alti sesler arasindan en iyisi, yoksa en dusugu.
+        fun pickAudio(fmt: MediaFormat): AudioStream? {
+            val l = audioOnly.filter { it.format == fmt }
+            return l.filter { it.averageBitrate in 1..130 }.maxByOrNull { it.averageBitrate } ?: l.minByOrNull { it.averageBitrate }
+        }
         val mp4Video = videoOnly.filter { it.format == MediaFormat.MPEG_4 }.maxByOrNull { it.height }
-        val m4aAudio = audioOnly.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+        val m4aAudio = pickAudio(MediaFormat.M4A)
         val webmVideo = videoOnly.filter { it.format == MediaFormat.WEBM }.maxByOrNull { it.height }
-        val webmAudio = audioOnly.filter { it.format == MediaFormat.WEBMA }.maxByOrNull { it.averageBitrate }
+        val webmAudio = pickAudio(MediaFormat.WEBMA)
 
-        val mergedMp4: (() -> MediaSource)? =
-            if (mp4Video != null && m4aAudio != null) ({ MergingMediaSource(source(mp4Video.content), source(m4aAudio.content)) }) else null
-        val mergedWebm: (() -> MediaSource)? =
-            if (webmVideo != null && webmAudio != null) ({ MergingMediaSource(source(webmVideo.content), source(webmAudio.content)) }) else null
-        val muxedSrc: (() -> MediaSource)? = muxed?.let { m -> { source(m.content) } }
-
-        // Secilen kalite hazir (ses+goruntu birlesik) akistan yuksekse ayri akislari birlestir.
-        val mergedHeight = maxOf(mp4Video?.height ?: 0, 0)
-        if (mergedMp4 != null && mergedHeight > (muxed?.height ?: 0)) out += mergedMp4
-        muxedSrc?.let { out += it }
-        if (mergedMp4 != null && mergedHeight <= (muxed?.height ?: 0)) out += mergedMp4
-        mergedWebm?.let { out += it }
+        class Opt(val height: Int, val priority: Int, val make: () -> MediaSource)
+        val opts = ArrayList<Opt>()
+        muxed?.let { m -> opts.add(Opt(m.height, 0) { source(m.content) }) }
+        if (mp4Video != null && m4aAudio != null) opts.add(Opt(mp4Video.height, 1) { MergingMediaSource(source(mp4Video.content), source(m4aAudio.content)) })
+        if (webmVideo != null && webmAudio != null) opts.add(Opt(webmVideo.height, 2) { MergingMediaSource(source(webmVideo.content), source(webmAudio.content)) })
+        // Secilen kaliteye en yakin (en yuksek) once; esitlikte hazir birlesik akis once.
+        opts.sortedWith(compareByDescending<Opt> { it.height }.thenBy { it.priority }).forEach { out.add(it.make) }
         if (dash != null) out += { DashMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(dash)) }
         if (!live && hls != null) out += { HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls)) }
         return out
