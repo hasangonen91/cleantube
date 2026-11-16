@@ -104,6 +104,7 @@ fun MiniPlayer(vm: MainVM, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerSheet(vm: MainVM) {
     val video = vm.playing ?: return
@@ -349,7 +350,7 @@ fun PlayerSheet(vm: MainVM) {
                                         }) { Text("Kapalı") }
                                         if (subs.isEmpty()) Text("Bu video için altyazı bulunamadı.", modifier = Modifier.padding(top = 8.dp))
                                         else subs.take(30).forEach { s ->
-                                            val lang = s.languageTag ?: s.code ?: "und"
+                                            val lang = runCatching { s.languageTag }.getOrNull().orEmpty().ifBlank { "und" }
                                             TextButton(onClick = {
                                                 activePlayer.trackSelectionParameters = activePlayer.trackSelectionParameters.buildUpon()
                                                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
@@ -440,7 +441,7 @@ fun PlayerSheet(vm: MainVM) {
         if (showComments) {
             var commentText by remember(video.id) { mutableStateOf("") }
             var posting by remember(video.id) { mutableStateOf(false) }
-            ModalBottomSheet(onDismissRequest = { showComments = false }) {
+            androidx.compose.material3.ModalBottomSheet(onDismissRequest = { showComments = false }) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text("Yorumlar", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     if (vm.loggedIn) {

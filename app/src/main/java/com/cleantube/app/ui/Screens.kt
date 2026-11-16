@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.cleantube.app.data.*
 
@@ -479,13 +480,15 @@ fun ChannelScreen(vm: MainVM) {
                 }
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     item {
+                        val banner = runCatching { info.javaClass.methods.firstOrNull { m -> m.name == "getBannerUrl" }?.invoke(info) as? String }.getOrNull().orEmpty()
+                        val avatar = runCatching { info.javaClass.methods.firstOrNull { m -> m.name == "getAvatarUrl" }?.invoke(info) as? String }.getOrNull().orEmpty()
                         Box(Modifier.fillMaxWidth().height(120.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
-                            if (info.bannerUrl.isNotBlank()) AsyncImage(info.bannerUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                            IconButton(onClick = { vm.closeChannel() }, modifier = Modifier.padding(4.dp)) { Icon(Icons.Filled.ArrowBack, null, tint = Color.White) }
+                            if (banner.isNotBlank()) AsyncImage(banner, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            IconButton(onClick = { vm.closeChannel() }, modifier = Modifier.padding(4.dp)) { Icon(Icons.Filled.ArrowBack, "Geri", tint = Color.White) }
                         }
                         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(64.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant), Alignment.Center) {
-                                if (info.avatarUrl.isNotBlank()) AsyncImage(info.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                if (avatar.isNotBlank()) AsyncImage(avatar, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                                 else Text(info.name.take(1).uppercase(), fontWeight = FontWeight.Bold, fontSize = 22.sp)
                             }
                             Spacer(Modifier.width(12.dp))
