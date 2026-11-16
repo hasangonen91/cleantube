@@ -6,11 +6,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +31,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -103,16 +113,39 @@ fun ErrorView(msg: String, onRetry: (() -> Unit)?) = Column(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(vm: MainVM) {
+    val listState = rememberLazyListState()
+    val pull = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val triggered = remember { androidx.compose.runtime.mutableStateOf(false) }
+    val pullConnection = remember(vm) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 && available.y > 0f) {
+                    pull.floatValue += available.y
+                    if (pull.floatValue > 120f && !triggered.value) { triggered.value = true; vm.refreshHome() }
+                    return Offset(0f, available.y * 0.35f)
+                }
+                if (available.y < 0f) { pull.floatValue = 0f; triggered.value = false }
+                return Offset.Zero
+            }
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                pull.floatValue = 0f; triggered.value = false
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(vm.homeScrollRequest) { listState.animateScrollToItem(0) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             BrandMark(30.dp)
             Spacer(Modifier.width(9.dp))
             Text("VYRO", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.6).sp)
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { vm.tab = 1 }) { Icon(Icons.Filled.Search, "Ara") }
+            IconButton(onClick = { vm.refreshHome() }) { Icon(Icons.Filled.Refresh, "Yenile") }
+            IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Search, "Ara") }
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Person, "Hesap") }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(onClick = { vm.tab = 3; vm.openSection(Section("Mixler", "FEmusic")) }, label = { Text("♫ Mixler") }, shape = RoundedCornerShape(9.dp))
             categories.forEachIndexed { index, category ->
                 FilterChip(
                     selected = (vm.categoryIndex == index),
@@ -131,7 +164,7 @@ fun HomeScreen(vm: MainVM) {
         when {
             vm.homeLoading && vm.home.isEmpty() -> Loading()
             vm.homeError != null && vm.home.isEmpty() -> ErrorView(vm.homeError!!) { vm.loadHome() }
-            else -> LazyColumn(Modifier.fillMaxSize()) {
+            else -> LazyColumn(Modifier.fillMaxSize().nestedScroll(pullConnection), state = listState) {
                 if (vm.categoryIndex == 0 && vm.shorts.isNotEmpty()) {
                     item { ShortsShelf(vm) }
                 }
@@ -154,40 +187,12 @@ private fun ShortsShelf(vm: MainVM) {
             TextButton(onClick = { vm.tab = 1 }) { Text("Tümünü gör") }
         }
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(vm.shorts.take(12), key = { it.id }) { video ->
-                Column(Modifier.width(154.dp).clickable { vm.playing = video }) {
+            itemsIndexed(vm.shorts.take(12), key = { _, v -> v.id }) { index, video ->
+                Column(Modifier.width(154.dp).clickable { vm.openShorts(index) }) {
                     AsyncImage(video.thumb, null, Modifier.fillMaxWidth().height(238.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
                     Spacer(Modifier.height(7.dp))
                     Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text(video.channel, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun ShortsScreen(vm: MainVM) {
-    if (vm.shorts.isEmpty()) {
-        if (vm.shortsLoading) Loading() else ErrorView("Shorts şu an yüklenemedi.", { vm.loadShorts() })
-        return
-    }
-    val pager = rememberPagerState(pageCount = { vm.shorts.size })
-    VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        val video = vm.shorts[page]
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(20.dp)) {
-                Text(video.channel, color = Color.White, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(6.dp))
-                Text(video.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { vm.playing = video }, shape = RoundedCornerShape(24.dp)) {
-                    Icon(Icons.Filled.PlayArrow, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("İzle")
                 }
             }
         }
@@ -199,7 +204,7 @@ fun SearchScreen(vm: MainVM) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = vm.query, onValueChange = { vm.query = it },
+                value = vm.query, onValueChange = { vm.query = it; vm.results = emptyList(); vm.suggest(it) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("YouTube'da ara") }, singleLine = true,
                 shape = RoundedCornerShape(28.dp),
@@ -208,7 +213,18 @@ fun SearchScreen(vm: MainVM) {
             )
             IconButton(onClick = { vm.search() }) { Icon(Icons.Filled.Search, "Ara") }
         }
-        when {
+        if (vm.query.isNotBlank() && vm.suggestions.isNotEmpty() && !vm.searching && vm.results.isEmpty()) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(vm.suggestions) { suggestion ->
+                    ListItem(
+                        leadingContent = { Icon(Icons.Filled.Search, null) },
+                        headlineContent = { Text(suggestion) },
+                        modifier = Modifier.clickable { vm.query = suggestion; vm.search() },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    )
+                }
+            }
+        } else when {
             vm.searching -> Loading()
             vm.searchError != null -> ErrorView(vm.searchError!!) { vm.search() }
             else -> VideoList(vm.results, { vm.playing = it })
@@ -218,6 +234,7 @@ fun SearchScreen(vm: MainVM) {
 
 private val sections = listOf(
     Section("Geçmiş", "FEhistory"),
+    Section("Mixler", "FEmusic"),
     Section("Oynatma listeleri", "", isPlaylists = true),
     Section("Daha sonra izle", "VLWL"),
     Section("Beğendiğim videolar", "VLLL"),
@@ -286,7 +303,7 @@ fun AppRoot(vm: MainVM) {
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                NavigationBarItem(vm.tab == 0, { vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
+                NavigationBarItem(vm.tab == 0, { if (vm.tab == 0) vm.refreshHome() else vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
                 NavigationBarItem(vm.tab == 1, { vm.tab = 1; vm.loadShorts() }, { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("Shorts") })
                 NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
                 NavigationBarItem(vm.tab == 3, { vm.tab = 3 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })

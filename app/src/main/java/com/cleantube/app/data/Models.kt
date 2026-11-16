@@ -7,6 +7,7 @@ data class Video(
     val durationText: String = "",
     val views: String = "",
     val published: String = "",
+    val short: Boolean = false,
 ) {
     val thumb: String get() = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
     val meta: String get() = listOf(channel, views, published).filter { it.isNotBlank() }.joinToString(" • ")
@@ -29,3 +30,6 @@ fun fmtViews(n: Long): String = when {
     n >= 1_000 -> "%d B görüntüleme".format(n / 1000)
     else -> "$n görüntüleme"
 }
+
+
+data class CommentItem(val id: String, val author: String, val text: String, val likes: String = "", val avatar: String = "")
