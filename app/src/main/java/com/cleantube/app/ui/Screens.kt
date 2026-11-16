@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -109,7 +110,8 @@ fun HomeScreen(vm: MainVM) {
             Spacer(Modifier.width(9.dp))
             Text("VYRO", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.6).sp)
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { vm.tab = 1 }) { Icon(Icons.Filled.Search, "Ara") }
+            IconButton(onClick = { vm.loadHome() }) { Icon(Icons.Filled.Refresh, "Yenile") }
+            IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Search, "Ara") }
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Person, "Hesap") }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -199,7 +201,7 @@ fun SearchScreen(vm: MainVM) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = vm.query, onValueChange = { vm.query = it },
+                value = vm.query, onValueChange = { vm.query = it; vm.suggest(it) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("YouTube'da ara") }, singleLine = true,
                 shape = RoundedCornerShape(28.dp),
@@ -208,7 +210,18 @@ fun SearchScreen(vm: MainVM) {
             )
             IconButton(onClick = { vm.search() }) { Icon(Icons.Filled.Search, "Ara") }
         }
-        when {
+        if (vm.query.isNotBlank() && vm.suggestions.isNotEmpty() && !vm.searching && vm.results.isEmpty()) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(vm.suggestions) { suggestion ->
+                    ListItem(
+                        leadingContent = { Icon(Icons.Filled.Search, null) },
+                        headlineContent = { Text(suggestion) },
+                        modifier = Modifier.clickable { vm.query = suggestion; vm.search() },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    )
+                }
+            }
+        } else when {
             vm.searching -> Loading()
             vm.searchError != null -> ErrorView(vm.searchError!!) { vm.search() }
             else -> VideoList(vm.results, { vm.playing = it })
@@ -218,6 +231,7 @@ fun SearchScreen(vm: MainVM) {
 
 private val sections = listOf(
     Section("Geçmiş", "FEhistory"),
+    Section("Mixler", "FEmusic"),
     Section("Oynatma listeleri", "", isPlaylists = true),
     Section("Daha sonra izle", "VLWL"),
     Section("Beğendiğim videolar", "VLLL"),
@@ -286,7 +300,7 @@ fun AppRoot(vm: MainVM) {
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                NavigationBarItem(vm.tab == 0, { vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
+                NavigationBarItem(vm.tab == 0, { if (vm.tab == 0) vm.loadHome() else vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
                 NavigationBarItem(vm.tab == 1, { vm.tab = 1; vm.loadShorts() }, { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("Shorts") })
                 NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
                 NavigationBarItem(vm.tab == 3, { vm.tab = 3 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
