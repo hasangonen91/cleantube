@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -62,6 +63,52 @@ object InnerTube {
         val pl = LinkedHashMap<String, PlaylistItem>()
         collect(browse("FEplaylist_aggregation"), out, pl)
         return pl.values.toList()
+    }
+
+
+    suspend fun suggestions(query: String): List<String> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        val url = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=" + Uri.encode(query)
+        client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+            if (!r.isSuccessful) return@withContext emptyList()
+            val arr = JSONArray(r.body?.string().orEmpty())
+            val values = arr.optJSONArray(1) ?: JSONArray()
+            (0 until values.length()).mapNotNull { values.optString(it).takeIf(String::isNotBlank) }.distinct().take(8)
+        }
+    }
+
+    suspend fun comments(videoId: String): List<CommentItem> = withContext(Dispatchers.IO) {
+        val ver = clientVersion()
+        val ctx = JSONObject().put("client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR"))
+        val body = JSONObject().put("context", ctx).put("videoId", videoId).toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$O/youtubei/v1/next?prettyPrint=false").post(body)
+            .header("User-Agent", UA).header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", ver)
+            .header("Origin", O).header("Referer", "$O/watch?v=$videoId").build()
+        client.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) error("Yorumlar alınamadı (${r.code})")
+            val out = LinkedHashMap<String, CommentItem>()
+            collectComments(JSONObject(r.body?.string().orEmpty()), out)
+            out.values.toList()
+        }
+    }
+
+    private fun collectComments(node: Any?, out: MutableMap<String, CommentItem>) {
+        when (node) {
+            is JSONArray -> for (i in 0 until node.length()) collectComments(node.opt(i), out)
+            is JSONObject -> {
+                val cr = node.optJSONObject("commentRenderer")
+                if (cr != null) {
+                    val id = cr.optString("commentId")
+                    val author = cr.optJSONObject("authorText")?.let(::txt).orEmpty()
+                    val body = cr.optJSONObject("contentText")?.let(::txt).orEmpty()
+                    val likes = cr.optJSONObject("voteCount")?.let(::txt).orEmpty()
+                    val avatar = cr.optJSONObject("authorThumbnail")?.optJSONArray("thumbnails")?.optJSONObject(0)?.optString("url").orEmpty()
+                    if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
+                }
+                val keys = node.keys()
+                while (keys.hasNext()) collectComments(node.opt(keys.next()), out)
+            }
+        }
     }
 
     private val SKIP = setOf("adSlotRenderer", "adPlacementRenderer", "promotedSparklesWebRenderer", "displayAdRenderer")
