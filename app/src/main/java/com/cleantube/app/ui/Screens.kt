@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -45,8 +46,12 @@ private fun BrandMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
 
 @Composable
 fun VideoCard(v: Video, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 18.dp)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp).padding(bottom = 22.dp)) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
             AsyncImage(v.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (v.durationText.isNotBlank()) {
                 Text(v.durationText, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
@@ -54,13 +59,13 @@ fun VideoCard(v: Video, onClick: () -> Unit) {
                         .background(Color(0xE6000000), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp))
             }
         }
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.size(38.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant), Alignment.Center) {
+        Row(Modifier.fillMaxWidth().padding(top = 11.dp), verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant), Alignment.Center) {
                 Text(v.channel.take(1).ifBlank { "C" }.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(v.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 19.sp)
+                Text(v.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, lineHeight = 20.sp)
                 if (v.meta.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(v.meta, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
