@@ -44,8 +44,12 @@ private val categories = listOf("Senin için", "Müzik", "Canlı", "Oyun", "Tekn
 
 @Composable
 private fun BrandMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
-    Box(Modifier.size(size).clip(RoundedCornerShape(9.dp)).background(Color(0xFFFF0033)), Alignment.Center) {
-        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(size * .78f))
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size * .32f))
+            .background(Brush.linearGradient(listOf(Color(0xFFFF315B), Color(0xFF9D1BFF), Color(0xFF3A164E)))),
+        Alignment.Center
+    ) {
+        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(size * .82f))
     }
 }
 
