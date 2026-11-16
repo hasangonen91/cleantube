@@ -6,6 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.pager.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -35,7 +40,7 @@ import coil.compose.AsyncImage
 import com.cleantube.app.data.Section
 import com.cleantube.app.data.Video
 
-private val categories = listOf("Tümü", "Müzik", "Canlı", "Oyun", "Mix'ler", "Teknoloji", "Haberler", "Spor")
+private val categories = listOf("Senin için", "Müzik", "Canlı", "Oyun", "Teknoloji", "Haberler", "Spor")
 
 @Composable
 private fun BrandMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
@@ -98,7 +103,7 @@ fun HomeScreen(vm: MainVM) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             BrandMark(30.dp)
             Spacer(Modifier.width(9.dp))
-            Text("CleanTube", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.6).sp)
+            Text("VYRO", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.6).sp)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { vm.tab = 1 }) { Icon(Icons.Filled.Search, "Ara") }
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Person, "Hesap") }
@@ -110,10 +115,7 @@ fun HomeScreen(vm: MainVM) {
                     onClick = {
                         vm.categoryIndex = index
                         if (index > 0) {
-                            vm.query = when (category) {
-                                "Mix'ler" -> "müzik mix"
-                                else -> category
-                            }
+                            vm.query = category
                             vm.search()
                         } else vm.loadHome()
                     },
@@ -125,7 +127,65 @@ fun HomeScreen(vm: MainVM) {
         when {
             vm.homeLoading && vm.home.isEmpty() -> Loading()
             vm.homeError != null && vm.home.isEmpty() -> ErrorView(vm.homeError!!) { vm.loadHome() }
-            else -> VideoList(if (vm.categoryIndex == 0) vm.home else vm.results, { vm.playing = it })
+            else -> LazyColumn(Modifier.fillMaxSize()) {
+                if (vm.categoryIndex == 0 && vm.shorts.isNotEmpty()) {
+                    item { ShortsShelf(vm) }
+                }
+                items(if (vm.categoryIndex == 0) vm.home else vm.results, key = { it.id }) {
+                    VideoCard(it) { vm.playing = it }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShortsShelf(vm: MainVM) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 14.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            BrandMark(27.dp)
+            Spacer(Modifier.width(9.dp))
+            Text("Shorts", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { vm.tab = 1 }) { Text("Tümünü gör") }
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(vm.shorts.take(12), key = { it.id }) { video ->
+                Column(Modifier.width(154.dp).clickable { vm.playing = video }) {
+                    AsyncImage(video.thumb, null, Modifier.fillMaxWidth().height(238.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
+                    Spacer(Modifier.height(7.dp))
+                    Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(video.channel, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ShortsScreen(vm: MainVM) {
+    if (vm.shorts.isEmpty()) {
+        if (vm.shortsLoading) Loading() else ErrorView("Shorts şu an yüklenemedi.", { vm.loadShorts() })
+        return
+    }
+    val pager = rememberPagerState(pageCount = { vm.shorts.size })
+    VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+        val video = vm.shorts[page]
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(20.dp)) {
+                Text(video.channel, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text(video.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { vm.playing = video }, shape = RoundedCornerShape(24.dp)) {
+                    Icon(Icons.Filled.PlayArrow, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("İzle")
+                }
+            }
         }
     }
 }
@@ -223,13 +283,14 @@ fun AppRoot(vm: MainVM) {
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
                 NavigationBarItem(vm.tab == 0, { vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
-                NavigationBarItem(vm.tab == 1, { vm.tab = 1 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Keşfet") })
-                NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
+                NavigationBarItem(vm.tab == 1, { vm.tab = 1; vm.loadShorts() }, { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("Shorts") })
+                NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
+                NavigationBarItem(vm.tab == 3, { vm.tab = 3 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
             }
         },
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
-            when (vm.tab) { 0 -> HomeScreen(vm); 1 -> SearchScreen(vm); else -> LibraryScreen(vm) }
+            when (vm.tab) { 0 -> HomeScreen(vm); 1 -> ShortsScreen(vm); 2 -> SearchScreen(vm); else -> LibraryScreen(vm) }
             if (playing != null) PlayerScreen(vm, playing)
         }
     }
