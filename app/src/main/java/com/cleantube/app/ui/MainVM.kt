@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 
 class MainVM : ViewModel() {
     var tab by mutableStateOf(0)
+    var categoryIndex by mutableStateOf(0)
     var playing by mutableStateOf<Video?>(null)
     var showLogin by mutableStateOf(false)
     var loggedIn by mutableStateOf(Auth.loggedIn)
@@ -32,6 +33,7 @@ class MainVM : ViewModel() {
     init { loadHome() }
 
     fun loadHome() = viewModelScope.launch {
+        categoryIndex = 0
         homeLoading = true; homeError = null
         try {
             home = if (Auth.loggedIn) {
