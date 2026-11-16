@@ -19,6 +19,9 @@ class MainVM : ViewModel() {
     var homeLoading by mutableStateOf(false)
     var homeError by mutableStateOf<String?>(null)
 
+    var shorts by mutableStateOf<List<Video>>(emptyList())
+    var shortsLoading by mutableStateOf(false)
+
     var query by mutableStateOf("")
     var results by mutableStateOf<List<Video>>(emptyList())
     var searching by mutableStateOf(false)
@@ -30,7 +33,7 @@ class MainVM : ViewModel() {
     var libLoading by mutableStateOf(false)
     var libError by mutableStateOf<String?>(null)
 
-    init { loadHome() }
+    init { loadHome(); loadShorts() }
 
     fun loadHome() = viewModelScope.launch {
         categoryIndex = 0
@@ -41,6 +44,21 @@ class MainVM : ViewModel() {
             } else Repo.trending()
         } catch (e: Exception) { homeError = e.message ?: "Yüklenemedi" }
         homeLoading = false
+    }
+
+    fun loadShorts() = viewModelScope.launch {
+        if (shorts.isNotEmpty()) return@launch
+        shortsLoading = true
+        try {
+            shorts = Repo.search("YouTube Shorts popüler").filter {
+                val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
+                    .fold(0L) { total, part -> total * 60 + part }
+                seconds in 1..180
+            }.take(30)
+        } catch (_: Exception) {
+            shorts = emptyList()
+        }
+        shortsLoading = false
     }
 
     fun search() = viewModelScope.launch {
