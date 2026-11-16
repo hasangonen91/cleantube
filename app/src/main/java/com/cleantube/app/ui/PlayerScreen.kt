@@ -3,6 +3,7 @@
 package com.cleantube.app.ui
 
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -31,6 +33,8 @@ import com.cleantube.app.data.HttpDownloader
 import com.cleantube.app.data.Repo
 import com.cleantube.app.data.Video
 import com.cleantube.app.data.fmtViews
+import kotlinx.coroutines.delay
+import com.cleantube.app.player.PlaybackService
 import org.schabi.newpipe.extractor.stream.StreamInfo
 
 @Composable
@@ -44,8 +48,24 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     var showQ by remember { mutableStateOf(false) }
     var loadedFor by remember { mutableStateOf<String?>(null) }
 
-    val player = remember { ExoPlayer.Builder(ctx).build().apply { playWhenReady = true } }
-    DisposableEffect(Unit) { onDispose { player.release() } }
+    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+    LaunchedEffect(Unit) {
+        ContextCompat.startForegroundService(ctx, Intent(ctx, PlaybackService::class.java))
+        repeat(60) {
+            PlaybackService.sharedPlayer?.let {
+                player = it
+                it.playWhenReady = true
+                return@LaunchedEffect
+            }
+            delay(50)
+        }
+        error = "Medya servisi başlatılamadı"
+    }
+    val activePlayer = player
+    if (activePlayer == null) {
+        Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
     DisposableEffect(full) {
         val w = activity?.window
         if (w != null) {
@@ -68,17 +88,17 @@ fun PlayerScreen(vm: MainVM, video: Video) {
 
     LaunchedEffect(video.id) {
         info = null; error = null
-        player.stop(); player.clearMediaItems()
+        activePlayer.stop(); activePlayer.clearMediaItems()
         try { info = Repo.resolve(video.id) } catch (e: Exception) { error = e.message ?: "Video açılamadı" }
     }
     LaunchedEffect(info, maxH) {
         val i = info ?: return@LaunchedEffect
-        val keepPos = if (loadedFor == video.id) player.currentPosition else 0L
+        val keepPos = if (loadedFor == video.id) activePlayer.currentPosition else 0L
         val factory = DefaultHttpDataSource.Factory().setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
         val src = Repo.buildSource(i, maxH, factory)
         if (src == null) { error = "Oynatılabilir akış bulunamadı"; return@LaunchedEffect }
-        player.setMediaSource(src); player.prepare()
-        if (keepPos > 0) player.seekTo(keepPos)
+        activePlayer.setMediaSource(src); activePlayer.prepare()
+        if (keepPos > 0) activePlayer.seekTo(keepPos)
         loadedFor = video.id
     }
     BackHandler { if (full) full = false else vm.playing = null }
@@ -88,7 +108,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
             modifier = m,
             factory = { c ->
                 PlayerView(c).apply {
-                    this.player = player; keepScreenOn = true
+                    this.player = activePlayer; keepScreenOn = true
                     setFullscreenButtonClickListener { full = !full }
                 }
             },
