@@ -6,20 +6,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFFFF0033),
+    primary = Color(0xFFFF315B),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF5C0017),
-    onPrimaryContainer = Color(0xFFFFD9DF),
-    secondary = Color(0xFFFF8A9B),
-    background = Color(0xFF0B0B0D),
+    primaryContainer = Color(0xFF64152B),
+    onPrimaryContainer = Color(0xFFFFDCE4),
+    secondary = Color(0xFFFF8BA6),
+    background = Color(0xFF08080B),
     onBackground = Color(0xFFF5F5F7),
-    surface = Color(0xFF101013),
+    surface = Color(0xFF111016),
     onSurface = Color(0xFFF5F5F7),
-    surfaceVariant = Color(0xFF242428),
+    surfaceVariant = Color(0xFF24202A),
     onSurfaceVariant = Color(0xFFAAAAB2),
     secondaryContainer = Color(0xFF29292E),
     onSecondaryContainer = Color.White,
 )
 
 @Composable
-fun CleanTubeTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = Dark, content = content)
+fun VyroTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = Dark, content = content)
