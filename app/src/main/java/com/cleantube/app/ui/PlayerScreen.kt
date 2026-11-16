@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Comment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -194,7 +193,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                                 .filter { it.isNotBlank() }.joinToString(" • ")
                             Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             TextButton(onClick = { showComments = true }) {
-                                Icon(Icons.Filled.Comment, null)
+                                Text("☰")
                                 Spacer(Modifier.width(6.dp))
                                 Text("Yorumları gör")
                             }
