@@ -145,6 +145,7 @@ fun HomeScreen(vm: MainVM) {
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Person, "Hesap") }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(onClick = { vm.tab = 3; vm.openSection(Section("Mixler", "FEmusic")) }, label = { Text("♫ Mixler") }, shape = RoundedCornerShape(9.dp))
             categories.forEachIndexed { index, category ->
                 FilterChip(
                     selected = (vm.categoryIndex == index),
