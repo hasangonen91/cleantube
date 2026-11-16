@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 class MainVM : ViewModel() {
     var tab by mutableStateOf(0)
     var categoryIndex by mutableStateOf(0)
+    var homeScrollRequest by mutableIntStateOf(0)
     var playing by mutableStateOf<Video?>(null)
     var showLogin by mutableStateOf(false)
     var loggedIn by mutableStateOf(Auth.loggedIn)
