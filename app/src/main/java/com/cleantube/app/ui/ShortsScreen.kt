@@ -55,7 +55,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Dikey Shorts akisi: kaydirinca bir sonraki video DIREKT oynar (dongu), dokununca duraklar. */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ShortsScreen(vm: MainVM) {
     if (vm.shorts.isEmpty()) {
