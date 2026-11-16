@@ -13,6 +13,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Comment
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -39,6 +45,8 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.cleantube.app.R
 import com.cleantube.app.data.HttpDownloader
+import com.cleantube.app.data.CommentItem
+import com.cleantube.app.data.InnerTube
 import com.cleantube.app.data.Prefs
 import com.cleantube.app.data.Repo
 import kotlinx.coroutines.CancellationException
@@ -66,6 +74,14 @@ fun ShortsScreen(vm: MainVM) {
     var muted by remember { mutableStateOf(false) }
     var userPaused by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showLongPressMenu by remember { mutableStateOf(false) }
+    var showComments by remember { mutableStateOf(false) }
+    var liked by remember(page) { mutableStateOf(false) }
+    var saved by remember(page) { mutableStateOf(false) }
+    var comments by remember(page) { mutableStateOf<List<CommentItem>>(emptyList()) }
+    var commentsLoading by remember(page) { mutableStateOf(false) }
+    var commentsError by remember(page) { mutableStateOf<String?>(null) }
+    var fullScreen by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     val chain = remember { SourceChain() }
@@ -141,7 +157,7 @@ fun ShortsScreen(vm: MainVM) {
             val current = i == page
             Box(
                 Modifier.fillMaxSize().pointerInput(current) {
-                    detectTapGestures(onTap = {
+                    detectTapGestures(onLongPress = { if (current) showLongPressMenu = true }, onTap = {
                         val p = player
                         if (current && p != null) {
                             p.playWhenReady = !p.playWhenReady
@@ -194,8 +210,18 @@ fun ShortsScreen(vm: MainVM) {
                     Spacer(Modifier.height(10.dp))
                     Text(video.title, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                // Sag: paylas + ses
-                Column(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                // Sag eylemler: YouTube Shorts yerlesimi
+                Column(Modifier.align(Alignment.CenterEnd).padding(end = 7.dp, bottom = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ShortAction(if (liked) "Beğenildi" else "Beğen", {
+                        Icon(if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "Beğen", tint = Color.White)
+                    }) { liked = !liked }
+                    Spacer(Modifier.height(8.dp))
+                    ShortAction("Yorum", { Icon(Icons.Filled.Comment, "Yorumlar", tint = Color.White) }) { showComments = true }
+                    Spacer(Modifier.height(8.dp))
+                    ShortAction(if (saved) "Kaydedildi" else "Kaydet", {
+                        Icon(if (saved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder, "Kaydet", tint = Color.White)
+                    }) { saved = !saved }
+                    Spacer(Modifier.height(8.dp))
                     ShortAction("Paylaş", { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }) {
                         try {
                             val send = Intent(Intent.ACTION_SEND).setType("text/plain")
@@ -203,13 +229,10 @@ fun ShortsScreen(vm: MainVM) {
                             ctx.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         } catch (_: Throwable) {}
                     }
-                    Spacer(Modifier.height(10.dp))
-                    ShortAction(if (muted) "Ses kapalı" else "Ses", {
+                    Spacer(Modifier.height(8.dp))
+                    ShortAction(if (muted) "Sessiz" else "Ses", {
                         Icon(painterResource(if (muted) R.drawable.ic_volume_off else R.drawable.ic_volume_up), "Ses", tint = Color.White)
-                    }) {
-                        muted = !muted
-                        player?.volume = if (muted) 0f else 1f
-                    }
+                    }) { muted = !muted; player?.volume = if (muted) 0f else 1f }
                 }
                 // Alt ilerleme cubugu
                 Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.dp).background(Color(0x44FFFFFF))) {
@@ -229,6 +252,65 @@ fun ShortsScreen(vm: MainVM) {
             onSelect = { Prefs.quality = it; quality = it; showQ = false },
             onDismiss = { showQ = false },
         )
+    }
+    if (showLongPressMenu) {
+        AlertDialog(
+            onDismissRequest = { showLongPressMenu = false },
+            title = { Text("Shorts seçenekleri") },
+            text = { Text("Tam ekran görünümünü açabilir veya video kalitesini değiştirebilirsin.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    fullScreen = !fullScreen
+                    val act = ctx as? android.app.Activity
+                    act?.requestedOrientation = if (fullScreen) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    val w = act?.window
+                    if (w != null) {
+                        val ctl = androidx.core.view.WindowCompat.getInsetsController(w, w.decorView)
+                        if (fullScreen) ctl.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars()) else ctl.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    }
+                    showLongPressMenu = false
+                }) { Text(if (fullScreen) "Tam ekrandan çık" else "Tam ekran yap") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLongPressMenu = false; showQ = true }) { Text("Kalite") }
+            }
+        )
+    }
+    if (showComments) {
+        ModalBottomSheet(onDismissRequest = { showComments = false }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text("Yorumlar", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(12.dp))
+                when {
+                    commentsLoading -> Box(Modifier.fillMaxWidth().height(120.dp), Alignment.Center) { CircularProgressIndicator() }
+                    commentsError != null -> Text(commentsError!!, color = MaterialTheme.colorScheme.error)
+                    comments.isEmpty() -> Text("Herkese açık yorum bulunamadı.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                        items(comments, key = { it.id }) { comment ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Top) {
+                                AsyncImage(comment.avatar.ifBlank { "https://www.youtube.com/s/desktop/12f6b690/img/favicon_144x144.png" }, null, Modifier.size(36.dp).clip(CircleShape))
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(comment.author, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(comment.text, fontSize = 14.sp, lineHeight = 19.sp)
+                                    if (comment.likes.isNotBlank()) Text("♡ ${comment.likes}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Divider()
+                        }
+                    }
+                }
+            }
+            LaunchedEffect(video.id) {
+                commentsLoading = true
+                commentsError = null
+                try { comments = InnerTube.comments(video.id) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Throwable) { commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi" }
+                commentsLoading = false
+            }
+        }
     }
 }
 
