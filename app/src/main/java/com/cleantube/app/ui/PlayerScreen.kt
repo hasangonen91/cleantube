@@ -26,6 +26,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -66,6 +68,15 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
         return
     }
+    DisposableEffect(activePlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(playbackError: PlaybackException) {
+                error = playbackError.localizedMessage ?: "Video akışı oynatılamadı"
+            }
+        }
+        activePlayer.addListener(listener)
+        onDispose { activePlayer.removeListener(listener) }
+    }
     DisposableEffect(full) {
         val w = activity?.window
         if (w != null) {
@@ -93,13 +104,26 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     }
     LaunchedEffect(info, maxH) {
         val i = info ?: return@LaunchedEffect
-        val keepPos = if (loadedFor == video.id) activePlayer.currentPosition else 0L
-        val factory = DefaultHttpDataSource.Factory().setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
-        val src = Repo.buildSource(i, maxH, factory)
-        if (src == null) { error = "Oynatılabilir akış bulunamadı"; return@LaunchedEffect }
-        activePlayer.setMediaSource(src); activePlayer.prepare()
-        if (keepPos > 0) activePlayer.seekTo(keepPos)
-        loadedFor = video.id
+        try {
+            val keepPos = if (loadedFor == video.id) activePlayer.currentPosition else 0L
+            val factory = DefaultHttpDataSource.Factory()
+                .setUserAgent(HttpDownloader.USER_AGENT)
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(20_000)
+                .setReadTimeoutMs(30_000)
+            val src = Repo.buildSource(i, maxH, factory)
+            if (src == null) {
+                error = "Bu video için uyumlu bir akış bulunamadı."
+                return@LaunchedEffect
+            }
+            activePlayer.setMediaSource(src)
+            activePlayer.prepare()
+            if (keepPos > 0) activePlayer.seekTo(keepPos)
+            activePlayer.playWhenReady = true
+            loadedFor = video.id
+        } catch (e: Exception) {
+            error = e.localizedMessage ?: "Video hazırlanırken hata oluştu."
+        }
     }
     BackHandler { if (full) full = false else vm.playing = null }
 
