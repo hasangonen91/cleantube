@@ -35,6 +35,8 @@ class PlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
+        // Ekran kapaliyken ses oynatimi sirasinda CPU uykuya gecmesin.
+        exoPlayer.setWakeMode(C.WAKE_MODE_LOCAL)
         sharedPlayer = exoPlayer
         mediaSession = MediaSession.Builder(this, exoPlayer).build()
     }
