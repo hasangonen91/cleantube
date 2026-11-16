@@ -15,8 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -188,7 +186,7 @@ fun PlayerOverlay(
                 IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Ayarlar", tint = Color.White) }
             }
             Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(34.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircleButton(44.dp, { seekBy(-5_000) }) { Icon(Icons.Filled.FastRewind, "5 saniye geri", tint = Color.White) }
+                CircleButton(44.dp, { seekBy(-5_000) }) { Text("«5", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
                 CircleButton(64.dp, { togglePlay() }) {
                     when {
                         buffering -> CircularProgressIndicator(Modifier.size(34.dp), color = Color.White, strokeWidth = 3.dp)
@@ -196,7 +194,7 @@ fun PlayerOverlay(
                         else -> Icon(Icons.Filled.PlayArrow, "Oynat", tint = Color.White, modifier = Modifier.size(42.dp))
                     }
                 }
-                CircleButton(44.dp, { seekBy(5_000) }) { Icon(Icons.Filled.FastForward, "5 saniye ileri", tint = Color.White) }
+                CircleButton(44.dp, { seekBy(5_000) }) { Text("5»", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
             }
             Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
