@@ -50,6 +50,8 @@ class MainVM : ViewModel() {
         }
     }
 
+    fun refreshHome() { homeScrollRequest++; loadHome() }
+
     fun loadHome() = viewModelScope.launch(safe) {
         categoryIndex = 0
         homeLoading = true; homeError = null
