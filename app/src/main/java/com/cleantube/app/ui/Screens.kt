@@ -3,9 +3,12 @@ package com.cleantube.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -13,7 +16,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,23 +35,37 @@ import coil.compose.AsyncImage
 import com.cleantube.app.data.Section
 import com.cleantube.app.data.Video
 
+private val categories = listOf("Tümü", "Müzik", "Canlı", "Oyun", "Mix'ler", "Teknoloji", "Haberler", "Spor")
+
+@Composable
+private fun BrandMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
+    Box(Modifier.size(size).clip(RoundedCornerShape(9.dp)).background(Color(0xFFFF0033)), Alignment.Center) {
+        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(size * .78f))
+    }
+}
+
 @Composable
 fun VideoCard(v: Video, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 16.dp)) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 18.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(MaterialTheme.colorScheme.surfaceVariant)) {
             AsyncImage(v.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (v.durationText.isNotBlank()) {
-                Text(
-                    v.durationText, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                Text(v.durationText, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
-                        .background(Color(0xCC000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
-                )
+                        .background(Color(0xE6000000), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp))
             }
         }
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(v.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 15.sp)
-            if (v.meta.isNotBlank()) {
-                Text(v.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp), verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(38.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant), Alignment.Center) {
+                Text(v.channel.take(1).ifBlank { "C" }.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(v.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 19.sp)
+                if (v.meta.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(v.meta, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
+                }
             }
         }
     }
@@ -58,7 +77,7 @@ fun VideoList(videos: List<Video>, onClick: (Video) -> Unit, modifier: Modifier 
 }
 
 @Composable
-fun Loading() = Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+fun Loading() = Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) }
 
 @Composable
 fun ErrorView(msg: String, onRetry: (() -> Unit)?) = Column(
@@ -72,29 +91,55 @@ fun ErrorView(msg: String, onRetry: (() -> Unit)?) = Column(
 @Composable
 fun HomeScreen(vm: MainVM) {
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("CleanTube", fontWeight = FontWeight.Bold) },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            BrandMark(30.dp)
+            Spacer(Modifier.width(9.dp))
+            Text("CleanTube", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.6).sp)
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { vm.tab = 1 }) { Icon(Icons.Filled.Search, "Ara") }
+            IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Person, "Hesap") }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            categories.forEachIndexed { index, category ->
+                FilterChip(
+                    selected = (vm.categoryIndex == index),
+                    onClick = {
+                        vm.categoryIndex = index
+                        if (index > 0) {
+                            vm.query = when (category) {
+                                "Mix'ler" -> "müzik mix"
+                                else -> category
+                            }
+                            vm.search()
+                        } else vm.loadHome()
+                    },
+                    label = { Text(category, fontSize = 13.sp) },
+                    shape = RoundedCornerShape(9.dp),
+                )
+            }
+        }
         when {
             vm.homeLoading && vm.home.isEmpty() -> Loading()
             vm.homeError != null && vm.home.isEmpty() -> ErrorView(vm.homeError!!) { vm.loadHome() }
-            else -> VideoList(vm.home, { vm.playing = it })
+            else -> VideoList(if (vm.categoryIndex == 0) vm.home else vm.results, { vm.playing = it })
         }
     }
 }
 
 @Composable
 fun SearchScreen(vm: MainVM) {
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        OutlinedTextField(
-            value = vm.query, onValueChange = { vm.query = it },
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            placeholder = { Text("YouTube'da ara") }, singleLine = true,
-            shape = RoundedCornerShape(28.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { vm.search() }),
-        )
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = vm.query, onValueChange = { vm.query = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("YouTube'da ara") }, singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { vm.search() }),
+            )
+            IconButton(onClick = { vm.search() }) { Icon(Icons.Filled.Search, "Ara") }
+        }
         when {
             vm.searching -> Loading()
             vm.searchError != null -> ErrorView(vm.searchError!!) { vm.search() }
@@ -104,28 +149,27 @@ fun SearchScreen(vm: MainVM) {
 }
 
 private val sections = listOf(
+    Section("Geçmiş", "FEhistory"),
+    Section("Oynatma listeleri", "", isPlaylists = true),
+    Section("Daha sonra izle", "VLWL"),
     Section("Beğendiğim videolar", "VLLL"),
     Section("Beğendiğim müzikler", "VLLM"),
-    Section("Sonra izle", "VLWL"),
-    Section("Geçmiş", "FEhistory"),
-    Section("Abonelik akışı", "FEsubscriptions"),
-    Section("Oynatma listeleri", "", isPlaylists = true),
+    Section("Abonelikler", "FEsubscriptions"),
 )
 
 @Composable
 fun LibraryScreen(vm: MainVM) {
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
+        Text("Kitaplık", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp))
         if (!vm.loggedIn) {
             Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
-                Text("Kitaplığın", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Beğendiğin şarkılar, geçmişin ve oynatma listelerin için Google hesabınla giriş yap. " +
-                        "Oturum bilgin yalnızca bu cihazda şifreli saklanır.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                BrandMark(56.dp)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { vm.showLogin = true }) { Text("Google ile giriş yap") }
+                Text("Kitaplığını yanında taşı", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Geçmişini, beğendiğin videoları ve oynatma listelerini görmek için Google hesabınla giriş yap.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { vm.showLogin = true }, shape = RoundedCornerShape(24.dp)) { Text("Google ile giriş yap") }
             }
             return@Column
         }
@@ -135,13 +179,14 @@ fun LibraryScreen(vm: MainVM) {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(sections) { sec ->
                     ListItem(
-                        headlineContent = { Text(sec.title) },
+                        leadingContent = { Icon(Icons.Filled.PlayArrow, null) },
+                        headlineContent = { Text(sec.title, fontWeight = FontWeight.Medium) },
                         modifier = Modifier.clickable { vm.openSection(sec) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }
                 item {
-                    TextButton(onClick = { vm.logout() }, Modifier.padding(8.dp)) { Text("Çıkış yap ve oturumu sil", color = MaterialTheme.colorScheme.primary) }
+                    TextButton(onClick = { vm.logout() }, Modifier.padding(8.dp)) { Text("Çıkış yap ve oturumu sil") }
                 }
             }
         } else {
@@ -154,11 +199,8 @@ fun LibraryScreen(vm: MainVM) {
                 vm.libError != null -> ErrorView(vm.libError!!) { vm.openSection(s) }
                 s.isPlaylists -> LazyColumn(Modifier.fillMaxSize()) {
                     items(vm.libPlaylists, key = { it.id }) { p ->
-                        ListItem(
-                            headlineContent = { Text(p.title) },
-                            modifier = Modifier.clickable { vm.openSection(Section(p.title, "VL" + p.id)) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        )
+                        ListItem(headlineContent = { Text(p.title) }, modifier = Modifier.clickable { vm.openSection(Section(p.title, "VL" + p.id)) },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent))
                     }
                 }
                 vm.libVideos.isEmpty() -> ErrorView("Burada gösterilecek bir şey bulunamadı.", null)
@@ -172,21 +214,19 @@ fun LibraryScreen(vm: MainVM) {
 fun AppRoot(vm: MainVM) {
     if (vm.showLogin) { LoginScreen(onDone = { vm.onLoggedIn() }, onCancel = { vm.showLogin = false }); return }
     val playing = vm.playing
-    Box(Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
-                    NavigationBarItem(vm.tab == 0, { vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
-                    NavigationBarItem(vm.tab == 1, { vm.tab = 1 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
-                    NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
-                }
-            },
-        ) { pad ->
-            Box(Modifier.padding(pad).fillMaxSize()) {
-                when (vm.tab) { 0 -> HomeScreen(vm); 1 -> SearchScreen(vm); else -> LibraryScreen(vm) }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
+                NavigationBarItem(vm.tab == 0, { vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
+                NavigationBarItem(vm.tab == 1, { vm.tab = 1 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Keşfet") })
+                NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
             }
+        },
+    ) { pad ->
+        Box(Modifier.padding(pad).fillMaxSize()) {
+            when (vm.tab) { 0 -> HomeScreen(vm); 1 -> SearchScreen(vm); else -> LibraryScreen(vm) }
+            if (playing != null) PlayerScreen(vm, playing)
         }
-        if (playing != null) PlayerScreen(vm, playing)
     }
 }
