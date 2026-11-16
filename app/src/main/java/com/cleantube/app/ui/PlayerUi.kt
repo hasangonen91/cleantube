@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -107,7 +109,7 @@ fun rememberServicePlayer(onFail: (String) -> Unit): ExoPlayer? {
     return player
 }
 
-/** YouTube tarzi kontroller: ust baslik, ortada onceki/oynat/sonraki, cift dokunma ile +-10 sn, ilerleme cubugu. */
+/** YouTube tarzı kontroller: oynat/duraklat, 5 saniyelik ileri/geri ve ardışık çift dokunuşta 5/10/15 saniyelik arama. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerOverlay(
@@ -129,6 +131,8 @@ fun PlayerOverlay(
     var feedback by remember { mutableStateOf<String?>(null) }
     var feedbackKey by remember { mutableIntStateOf(0) }
     var touchKey by remember { mutableIntStateOf(0) }
+    var forwardTapCount by remember { mutableIntStateOf(0) }
+    var backwardTapCount by remember { mutableIntStateOf(0) }
 
     DisposableEffect(player) {
         val l = object : Player.Listener {
@@ -149,12 +153,14 @@ fun PlayerOverlay(
         if (visible && isPlaying && scrub == null) { delay(3500); visible = false }
     }
     LaunchedEffect(feedbackKey) { if (feedbackKey > 0) { delay(700); feedback = null } }
+    LaunchedEffect(forwardTapCount) { if (forwardTapCount > 0) { delay(1200); forwardTapCount = 0 } }
+    LaunchedEffect(backwardTapCount) { if (backwardTapCount > 0) { delay(1200); backwardTapCount = 0 } }
 
     fun seekBy(d: Long) {
         val max = if (dur > 0) dur else Long.MAX_VALUE
         val t = (player.currentPosition + d).coerceIn(0L, max)
         player.seekTo(t); pos = t
-        feedback = if (d < 0) "« 10 sn" else "10 sn »"; feedbackKey++
+        feedback = if (d < 0) "« ${kotlin.math.abs(d) / 1000} sn" else "${d / 1000} sn »"; feedbackKey++
     }
     fun togglePlay() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
@@ -166,7 +172,10 @@ fun PlayerOverlay(
         modifier.pointerInput(Unit) {
             detectTapGestures(
                 onTap = { visible = !visible; touchKey++ },
-                onDoubleTap = { o -> if (o.x < size.width / 2f) seekBy(-10_000) else seekBy(10_000) },
+                onDoubleTap = { o ->
+                    if (o.x < size.width / 2f) { backwardTapCount++; forwardTapCount = 0; seekBy(-5_000L * backwardTapCount) }
+                    else { forwardTapCount++; backwardTapCount = 0; seekBy(5_000L * forwardTapCount) }
+                },
             )
         }
     ) {
@@ -179,7 +188,7 @@ fun PlayerOverlay(
                 IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Ayarlar", tint = Color.White) }
             }
             Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(34.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircleButton(44.dp, { player.seekTo(0); touchKey++ }) { Icon(painterResource(R.drawable.ic_skip_previous), "Başa sar", tint = Color.White) }
+                CircleButton(44.dp, { seekBy(-5_000) }) { Icon(Icons.Filled.FastRewind, "5 saniye geri", tint = Color.White) }
                 CircleButton(64.dp, { togglePlay() }) {
                     when {
                         buffering -> CircularProgressIndicator(Modifier.size(34.dp), color = Color.White, strokeWidth = 3.dp)
@@ -187,7 +196,7 @@ fun PlayerOverlay(
                         else -> Icon(Icons.Filled.PlayArrow, "Oynat", tint = Color.White, modifier = Modifier.size(42.dp))
                     }
                 }
-                CircleButton(44.dp, { onNext() }) { Icon(painterResource(R.drawable.ic_skip_next), "Sonraki", tint = Color.White) }
+                CircleButton(44.dp, { seekBy(5_000) }) { Icon(Icons.Filled.FastForward, "5 saniye ileri", tint = Color.White) }
             }
             Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
