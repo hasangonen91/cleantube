@@ -24,7 +24,7 @@ adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8;  alive "t+8s"
 sleep 12; alive "t+20s"; texts "01_home"
 
-tap_text "Shorts" ; sleep 8; alive "shorts"; texts "02_shorts"
+tap_text "Shorts" ; sleep 25; alive "shorts"; texts "02_shorts"
 adb shell input swipe 540 1700 540 500 300; sleep 6; alive "shorts-kaydir"; texts "02b_shorts_swipe"
 adb shell input tap 540 1000; sleep 1; texts "02c_shorts_tap"
 tap_text "Ara";     sleep 2
@@ -43,7 +43,7 @@ tap_text "Ayarlar" && { sleep 2; texts "05_settings_sheet"; dump; xy=$(python3 s
 tap_text "Kalite" && { sleep 1; texts "05_quality_menu"; dump; xy=$(python3 scripts/ui_tap.py "$UI" tap "360p") && adb shell input tap $xy; sleep 8; alive "kalite"; texts "06_after_quality"; }
 # tam ekran (kontroller gorunsun diye once oynaticiya dokun)
 adb shell input tap 540 450; sleep 1
-tap_text "ullscreen" && { sleep 3; echo "[tamekran] rotasyon: $(adb shell dumpsys window | grep -m1 -oE 'mCurrentRotation=[A-Z_0-9a-z]+')"; alive "tamekran"; adb shell input keyevent 4; sleep 2; }
+tap_text "Tam ekran" && { sleep 3; echo "[tamekran] rotasyon: $(adb shell dumpsys window | grep -m1 -oE 'mCurrentRotation=[A-Z_0-9a-z]+')"; alive "tamekran"; adb shell input keyevent 4; sleep 2; }
 alive "son"
 adb shell input keyevent 4; sleep 2; alive "geri"; texts "07_after_back"
 

@@ -82,6 +82,8 @@ class MainVM : ViewModel() {
                     val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull).fold(0L) { total, part -> total * 60 + part }
                     if (v.short || seconds in 1..180) found.putIfAbsent(v.id, v)
                 }
+                // Ilk video gelir gelmez goster; kalani arkada eklenir.
+                if (found.size > shorts.size) shorts = found.values.toList()
             } catch (e: CancellationException) { shortsLoading = false; throw e } catch (e: Throwable) {
                 Log.w("VYRO", "Shorts sorgusu basarisiz: $q", e)
             }
