@@ -174,7 +174,7 @@ fun SearchScreen(vm: MainVM) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = vm.query, onValueChange = { vm.query = it; vm.suggest(it) },
+                value = vm.query, onValueChange = { vm.query = it; vm.results = emptyList(); vm.suggest(it) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("YouTube'da ara") }, singleLine = true,
                 shape = RoundedCornerShape(28.dp),
