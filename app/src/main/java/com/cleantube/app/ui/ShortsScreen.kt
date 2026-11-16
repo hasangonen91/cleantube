@@ -240,6 +240,9 @@ fun ShortsScreen(vm: MainVM) {
         }
         // Ust baslik: arama + ayarlar (YouTube Shorts gibi)
         Row(Modifier.align(Alignment.TopEnd).padding(horizontal = 4.dp, vertical = 4.dp)) {
+            IconButton(onClick = { muted = !muted; player?.volume = if (muted) 0f else 1f }) {
+                Icon(painterResource(if (muted) R.drawable.ic_volume_off else R.drawable.ic_volume_up), "Sesi aç/kapat", tint = Color.White)
+            }
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Search, "Ara", tint = Color.White) }
             IconButton(onClick = { showQ = true }) { Icon(Icons.Filled.MoreVert, "Ayarlar", tint = Color.White) }
         }
