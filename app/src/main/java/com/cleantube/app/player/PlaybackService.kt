@@ -1,28 +1,51 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.cleantube.app.player
 
+import android.content.Intent
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
 /**
- * App-wide playback owner.
+ * Uygulama genelindeki oynatma sahibi.
  *
- * The UI attaches to this player; it must not release the player when a Compose
- * destination leaves composition. MediaSessionService keeps audio playback alive
- * while the app is backgrounded and exposes system media controls.
+ * Oynatici SADECE bu servis olusturur ve SADECE servis yok edilirken release eder.
+ * Compose ekrani kapaninca oynatici release EDILMEZ; ekran yalnizca MediaController ile
+ * servise baglanir (SessionToken) ve ayni ExoPlayer'a PlayerView baglar. Boylece uygulama
+ * arka plana gecince ses devam eder ve sistem medya kontrolleri calisir.
  */
 class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
 
     override fun onCreate() {
         super.onCreate()
-        val exoPlayer = ExoPlayer.Builder(this).build()
+        // Kucuk tampon: gereksiz on-yukleme yapmaz, internet tuketimini dusurur.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 30_000, 1_500, 3_000)
+            .build()
+        val exoPlayer = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+                /* handleAudioFocus = */ true,
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .build()
         sharedPlayer = exoPlayer
         mediaSession = MediaSession.Builder(this, exoPlayer).build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
-        mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+
+    /** Uygulama son uygulamalardan kapatilirsa ve calmiyorsa servis de kapansin. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val p = mediaSession?.player
+        if (p == null || !p.playWhenReady || p.mediaItemCount == 0) stopSelf()
+    }
 
     override fun onDestroy() {
         mediaSession?.run {

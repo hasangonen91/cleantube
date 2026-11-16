@@ -17,6 +17,7 @@ import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.stream.VideoStream
 
 /** Reklamsiz icerik: NewPipeExtractor dogrudan akis adreslerini verir, reklam verisi hic alinmaz. */
@@ -26,7 +27,8 @@ object Repo {
 
     private fun StreamInfoItem.toVideo(): Video? {
         val id = idRegex.find(url)?.groupValues?.get(1) ?: return null
-        return Video(id, name.orEmpty(), uploaderName.orEmpty(), fmtDuration(duration), fmtViews(viewCount), textualUploadDate.orEmpty())
+        val isShort = runCatching { isShortFormContent }.getOrDefault(false)
+        return Video(id, name.orEmpty(), uploaderName.orEmpty(), fmtDuration(duration), fmtViews(viewCount), textualUploadDate.orEmpty(), isShort)
     }
 
     suspend fun search(q: String): List<Video> = withContext(Dispatchers.IO) {
@@ -60,41 +62,44 @@ object Repo {
         (info.videoOnlyStreams.progressive().map { it.height } + info.videoStreams.progressive().map { it.height })
             .filter { it > 0 }.distinct().sortedDescending()
 
-    fun buildSource(info: StreamInfo, maxHeight: Int, f: DataSource.Factory): MediaSource? = runCatching {
+    /**
+     * Oynatma icin SIRALI aday kaynaklar. Biri hata verirse oynatici siradakini dener
+     * (progressive -> ayri ses/goruntu birlestirme -> DASH -> HLS). Her aday tembel uretilir.
+     */
+    fun candidates(info: StreamInfo, maxHeight: Int, f: DataSource.Factory): List<() -> MediaSource> {
+        val out = ArrayList<() -> MediaSource>()
         val progressiveFactory = ProgressiveMediaSource.Factory(f)
         fun source(url: String) = progressiveFactory.createMediaSource(MediaItem.fromUri(url))
 
-        // Prefer a single progressive stream with audio + video for maximum device compatibility.
-        val muxed = info.videoStreams.progressive()
-            .filter { it.height in 1..maxHeight }
-            .maxByOrNull { it.height }
-            ?: info.videoStreams.progressive().maxByOrNull { it.height }
-        if (muxed != null) return@runCatching source(muxed.content)
+        val hls = info.hlsUrl?.takeIf { it.isNotBlank() }
+        val dash = info.dashMpdUrl?.takeIf { it.isNotBlank() }
+        val live = info.streamType == StreamType.LIVE_STREAM || info.streamType == StreamType.AUDIO_LIVE_STREAM
+        // Canli yayinda once HLS.
+        if (live && hls != null) out += { HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls)) }
 
-        // Fall back to separate tracks only when a muxed stream is unavailable.
+        val muxed = info.videoStreams.progressive().filter { it.height in 1..maxHeight }.maxByOrNull { it.height }
+            ?: info.videoStreams.progressive().minByOrNull { it.height }
         val videoOnly = info.videoOnlyStreams.progressive().filter { it.height in 1..maxHeight }
         val audioOnly = info.audioStreams.progressive()
+        // Veri tasarrufu: ~130 kbps ve alti sesler arasindan en iyisi, yoksa en dusugu.
+        fun pickAudio(fmt: MediaFormat): AudioStream? {
+            val l = audioOnly.filter { it.format == fmt }
+            return l.filter { it.averageBitrate in 1..130 }.maxByOrNull { it.averageBitrate } ?: l.minByOrNull { it.averageBitrate }
+        }
         val mp4Video = videoOnly.filter { it.format == MediaFormat.MPEG_4 }.maxByOrNull { it.height }
-        val m4aAudio = audioOnly.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-        if (mp4Video != null && m4aAudio != null) {
-            return@runCatching MergingMediaSource(source(mp4Video.content), source(m4aAudio.content))
-        }
-
+        val m4aAudio = pickAudio(MediaFormat.M4A)
         val webmVideo = videoOnly.filter { it.format == MediaFormat.WEBM }.maxByOrNull { it.height }
-        val webmAudio = audioOnly.filter { it.format == MediaFormat.WEBMA }.maxByOrNull { it.averageBitrate }
-        if (webmVideo != null && webmAudio != null) {
-            return@runCatching MergingMediaSource(source(webmVideo.content), source(webmAudio.content))
-        }
+        val webmAudio = pickAudio(MediaFormat.WEBMA)
 
-        val dash = info.dashMpdUrl
-        if (!dash.isNullOrBlank()) {
-            return@runCatching DashMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(dash))
-        }
-
-        val hls = info.hlsUrl
-        if (!hls.isNullOrBlank()) {
-            return@runCatching HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls))
-        }
-        null
-    }.getOrNull()
+        class Opt(val height: Int, val priority: Int, val make: () -> MediaSource)
+        val opts = ArrayList<Opt>()
+        muxed?.let { m -> opts.add(Opt(m.height, 0) { source(m.content) }) }
+        if (mp4Video != null && m4aAudio != null) opts.add(Opt(mp4Video.height, 1) { MergingMediaSource(source(mp4Video.content), source(m4aAudio.content)) })
+        if (webmVideo != null && webmAudio != null) opts.add(Opt(webmVideo.height, 2) { MergingMediaSource(source(webmVideo.content), source(webmAudio.content)) })
+        // Secilen kaliteye en yakin (en yuksek) once; esitlikte hazir birlesik akis once.
+        opts.sortedWith(compareByDescending<Opt> { it.height }.thenBy { it.priority }).forEach { out.add(it.make) }
+        if (dash != null) out += { DashMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(dash)) }
+        if (!live && hls != null) out += { HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls)) }
+        return out
+    }
 }

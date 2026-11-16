@@ -1,11 +1,15 @@
 package com.cleantube.app.ui
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cleantube.app.data.*
+import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.launch
 
 class MainVM : ViewModel() {
@@ -21,6 +25,7 @@ class MainVM : ViewModel() {
 
     var shorts by mutableStateOf<List<Video>>(emptyList())
     var shortsLoading by mutableStateOf(false)
+    var shortsIndex by mutableIntStateOf(0)
 
     var query by mutableStateOf("")
     var results by mutableStateOf<List<Video>>(emptyList())
@@ -33,39 +38,83 @@ class MainVM : ViewModel() {
     var libLoading by mutableStateOf(false)
     var libError by mutableStateOf<String?>(null)
 
+    /** Hicbir coroutine hatasi (Exception veya Error) uygulamanin ana surecini dusurmesin. */
+    private val safe = CoroutineExceptionHandler { _, t -> Log.e("VYRO", "Yakalanmamis coroutine hatasi", t) }
+
+    private fun friendly(t: Throwable, fallback: String): String {
+        Log.w("VYRO", fallback, t)
+        return when (t) {
+            is java.io.IOException -> "İnternet bağlantısı yok veya sunucuya ulaşılamadı."
+            else -> t.message?.takeIf { it.isNotBlank() }?.let { "$fallback ($it)" } ?: fallback
+        }
+    }
+
     init { loadHome(); loadShorts() }
 
-    fun loadHome() = viewModelScope.launch {
+    fun loadHome() = viewModelScope.launch(safe) {
         categoryIndex = 0
         homeLoading = true; homeError = null
         try {
             home = if (Auth.loggedIn) {
                 runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Repo.trending()
             } else Repo.trending()
-        } catch (e: Exception) { homeError = e.message ?: "Yüklenemedi" }
+        } catch (e: CancellationException) { throw e } catch (e: Throwable) { homeError = friendly(e, "Yüklenemedi") }
         homeLoading = false
     }
 
-    fun loadShorts() = viewModelScope.launch {
-        if (shorts.isNotEmpty()) return@launch
+    private val shortsQueries = listOf(
+        "#shorts", "#shorts komik", "#shorts müzik", "#shorts oyun", "#youtubeshorts", "#shorts futbol",
+        "#shorts yemek", "#shorts kedi", "#shorts tiktok", "#shorts dans", "#shorts teknoloji", "#shorts spor",
+    )
+    private var shortsQ = 0
+
+    private suspend fun fetchShorts(minNew: Int) {
         shortsLoading = true
-        try {
-            shorts = Repo.search("YouTube Shorts popüler").filter {
-                val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
-                    .fold(0L) { total, part -> total * 60 + part }
-                seconds in 1..180
-            }.take(30)
-        } catch (_: Exception) {
-            shorts = emptyList()
+        val found = LinkedHashMap<String, Video>()
+        shorts.forEach { found[it.id] = it }
+        val before = found.size
+        var tries = 0
+        // Tek sorgu az sonuc verebilir; sirayla birkac sorgu deneyip kisa videolari (<=3 dk) topla.
+        while (tries < shortsQueries.size && found.size - before < minNew) {
+            val q = shortsQueries[shortsQ % shortsQueries.size]; shortsQ++; tries++
+            try {
+                Repo.search(q).forEach { v ->
+                    val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull).fold(0L) { total, part -> total * 60 + part }
+                    if (v.short || seconds in 1..180) found.putIfAbsent(v.id, v)
+                }
+                // Ilk video gelir gelmez goster; kalani arkada eklenir.
+                if (found.size > shorts.size) shorts = found.values.toList()
+            } catch (e: CancellationException) { shortsLoading = false; throw e } catch (e: Throwable) {
+                Log.w("VYRO", "Shorts sorgusu basarisiz: $q", e)
+            }
         }
+        shorts = found.values.toList()
+        Log.i("VYRO", "Shorts yuklendi: ${shorts.size}")
         shortsLoading = false
     }
 
-    fun search() = viewModelScope.launch {
+    fun loadShorts() = viewModelScope.launch(safe) { if (shorts.isEmpty() && !shortsLoading) fetchShorts(12) }
+    fun moreShorts() = viewModelScope.launch(safe) { if (!shortsLoading) fetchShorts(8) }
+    fun openShorts(index: Int) { shortsIndex = index; tab = 1 }
+
+    private val infoCache = LinkedHashMap<String, org.schabi.newpipe.extractor.stream.StreamInfo>()
+
+    /** Akis bilgisini (kisa omurlu URL'ler) kucuk bir onbellekle cozer; sonraki Shorts onceden yuklenir. */
+    suspend fun streamInfo(id: String): org.schabi.newpipe.extractor.stream.StreamInfo {
+        synchronized(infoCache) { infoCache[id] }?.let { return it }
+        val i = Repo.resolve(id)
+        synchronized(infoCache) {
+            infoCache[id] = i
+            while (infoCache.size > 8) infoCache.remove(infoCache.keys.first())
+        }
+        return i
+    }
+
+    fun search() = viewModelScope.launch(safe) {
         val q = query.trim()
         if (q.isEmpty()) return@launch
         searching = true; searchError = null
-        try { results = Repo.search(q) } catch (e: Exception) { searchError = e.message ?: "Arama başarısız" }
+        try { results = Repo.search(q) } catch (e: CancellationException) { throw e } catch (e: Throwable) { searchError = friendly(e, "Arama başarısız") }
         searching = false
     }
 
@@ -73,11 +122,11 @@ class MainVM : ViewModel() {
         section = s
         libVideos = emptyList(); libPlaylists = emptyList(); libError = null
         if (s == null) return
-        viewModelScope.launch {
+        viewModelScope.launch(safe) {
             libLoading = true
             try {
                 if (s.isPlaylists) libPlaylists = InnerTube.playlists() else libVideos = InnerTube.videos(s.browseId)
-            } catch (e: Exception) { libError = e.message ?: "Yüklenemedi" }
+            } catch (e: CancellationException) { throw e } catch (e: Throwable) { libError = friendly(e, "Yüklenemedi") }
             libLoading = false
         }
     }
