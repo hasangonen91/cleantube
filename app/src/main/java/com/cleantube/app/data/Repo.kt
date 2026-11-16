@@ -27,7 +27,8 @@ object Repo {
 
     private fun StreamInfoItem.toVideo(): Video? {
         val id = idRegex.find(url)?.groupValues?.get(1) ?: return null
-        return Video(id, name.orEmpty(), uploaderName.orEmpty(), fmtDuration(duration), fmtViews(viewCount), textualUploadDate.orEmpty())
+        val isShort = runCatching { isShortFormContent }.getOrDefault(false)
+        return Video(id, name.orEmpty(), uploaderName.orEmpty(), fmtDuration(duration), fmtViews(viewCount), textualUploadDate.orEmpty(), isShort)
     }
 
     suspend fun search(q: String): List<Video> = withContext(Dispatchers.IO) {

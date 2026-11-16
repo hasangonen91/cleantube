@@ -7,6 +7,7 @@ data class Video(
     val durationText: String = "",
     val views: String = "",
     val published: String = "",
+    val short: Boolean = false,
 ) {
     val thumb: String get() = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
     val meta: String get() = listOf(channel, views, published).filter { it.isNotBlank() }.joinToString(" • ")

@@ -69,7 +69,7 @@ class MainVM : ViewModel() {
             try {
                 Repo.search(q).forEach { v ->
                     val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull).fold(0L) { total, part -> total * 60 + part }
-                    if (seconds in 1..180) found.putIfAbsent(v.id, v)
+                    if (v.short || seconds in 1..180) found.putIfAbsent(v.id, v)
                 }
             } catch (e: CancellationException) { throw e } catch (e: Throwable) {
                 Log.w("VYRO", "Shorts sorgusu basarisiz: $q", e)
