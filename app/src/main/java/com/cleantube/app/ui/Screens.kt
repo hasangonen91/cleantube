@@ -6,6 +6,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.VerticalPager
@@ -105,13 +113,34 @@ fun ErrorView(msg: String, onRetry: (() -> Unit)?) = Column(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(vm: MainVM) {
+    val listState = rememberLazyListState()
+    val pull = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val triggered = remember { androidx.compose.runtime.mutableStateOf(false) }
+    val pullConnection = remember(vm) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 && available.y > 0f) {
+                    pull.floatValue += available.y
+                    if (pull.floatValue > 120f && !triggered.value) { triggered.value = true; vm.refreshHome() }
+                    return Offset(0f, available.y * 0.35f)
+                }
+                if (available.y < 0f) { pull.floatValue = 0f; triggered.value = false }
+                return Offset.Zero
+            }
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                pull.floatValue = 0f; triggered.value = false
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(vm.homeScrollRequest) { listState.animateScrollToItem(0) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             BrandMark(30.dp)
             Spacer(Modifier.width(9.dp))
             Text("VYRO", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-.6).sp)
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { vm.loadHome() }) { Icon(Icons.Filled.Refresh, "Yenile") }
+            IconButton(onClick = { vm.refreshHome() }) { Icon(Icons.Filled.Refresh, "Yenile") }
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Search, "Ara") }
             IconButton(onClick = { vm.tab = 2 }) { Icon(Icons.Filled.Person, "Hesap") }
         }
@@ -134,7 +163,7 @@ fun HomeScreen(vm: MainVM) {
         when {
             vm.homeLoading && vm.home.isEmpty() -> Loading()
             vm.homeError != null && vm.home.isEmpty() -> ErrorView(vm.homeError!!) { vm.loadHome() }
-            else -> LazyColumn(Modifier.fillMaxSize()) {
+            else -> LazyColumn(Modifier.fillMaxSize().nestedScroll(pullConnection), state = listState) {
                 if (vm.categoryIndex == 0 && vm.shorts.isNotEmpty()) {
                     item { ShortsShelf(vm) }
                 }
@@ -273,7 +302,7 @@ fun AppRoot(vm: MainVM) {
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                NavigationBarItem(vm.tab == 0, { if (vm.tab == 0) vm.loadHome() else vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
+                NavigationBarItem(vm.tab == 0, { if (vm.tab == 0) vm.refreshHome() else vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
                 NavigationBarItem(vm.tab == 1, { vm.tab = 1; vm.loadShorts() }, { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("Shorts") })
                 NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
                 NavigationBarItem(vm.tab == 3, { vm.tab = 3 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
