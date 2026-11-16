@@ -67,9 +67,11 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         BackHandler { vm.playing = null }
         return
     }
-    // Video kapatilinca oynatmayi durdur; oynatici servisin, release ETME.
-    DisposableEffect(activePlayer) {
-        onDispose { runCatching { activePlayer.stop(); activePlayer.clearMediaItems() } }
+    // Ekran kapanip uygulama arka plana gecince servis oynatmaya devam eder.
+    // Oynatma yalnizca kullanici oynaticiyi kapattiginda durdurulur.
+    val closePlayer = {
+        runCatching { activePlayer.pause(); activePlayer.stop(); activePlayer.clearMediaItems() }
+        vm.playing = null
     }
     DisposableEffect(activePlayer) {
         val listener = object : Player.Listener {
@@ -139,7 +141,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
             error = e.localizedMessage ?: "Video hazırlanırken hata oluştu."
         }
     }
-    BackHandler { if (full) full = false else vm.playing = null }
+    BackHandler { if (full) full = false else closePlayer() }
 
     val playerView: @Composable (Modifier) -> Unit = { m ->
         AndroidView(
@@ -156,7 +158,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     val overlay: @Composable (Modifier) -> Unit = { m ->
         PlayerOverlay(
             player = activePlayer, full = full,
-            onClose = { if (full) full = false else vm.playing = null },
+            onClose = { if (full) full = false else closePlayer() },
             onFullscreen = { full = !full },
             onSettings = { showQ = true },
             onNext = { info?.let { Repo.related(it).firstOrNull() }?.let { vm.playing = it } },
