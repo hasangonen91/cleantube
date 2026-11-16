@@ -12,6 +12,6 @@ class MainActivity : ComponentActivity() {
     private val vm: MainVM by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CleanTubeTheme { AppRoot(vm) } }
+        setContent { VyroTheme { AppRoot(vm) } }
     }
 }
