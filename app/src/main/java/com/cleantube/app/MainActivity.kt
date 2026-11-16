@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import com.cleantube.app.ui.AppRoot
-import com.cleantube.app.ui.CleanTubeTheme
+import com.cleantube.app.ui.VyroTheme
 import com.cleantube.app.ui.MainVM
 
 class MainActivity : ComponentActivity() {
