@@ -49,8 +49,6 @@ class MainVM : ViewModel() {
         }
     }
 
-    init { loadHome(); loadShorts() }
-
     fun loadHome() = viewModelScope.launch(safe) {
         categoryIndex = 0
         homeLoading = true; homeError = null
@@ -137,4 +135,7 @@ class MainVM : ViewModel() {
         Auth.logout(); loggedIn = false; section = null
         libVideos = emptyList(); libPlaylists = emptyList(); loadHome()
     }
+
+    // Ozellikler (shortsQueries, infoCache...) tanimlandiktan SONRA baslat.
+    init { loadHome(); loadShorts() }
 }
