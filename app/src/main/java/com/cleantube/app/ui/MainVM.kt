@@ -65,7 +65,7 @@ class MainVM : ViewModel() {
         shortsLoading = true
         val found = LinkedHashMap<String, Video>()
         // Tek sorgu bos donebilir; sirayla birkac sorgu deneyip kisa videolari (<=3 dk) topla.
-        for (q in listOf("#shorts", "shorts popüler", "#shorts komik", "#shorts müzik", "#shorts oyun")) {
+        for (q in listOf("#shorts", "#shorts komik", "#shorts müzik", "#shorts oyun", "#youtubeshorts", "#shorts futbol", "#shorts yemek", "#shorts kedi", "#shorts tiktok", "#shorts dans", "#shorts teknoloji", "#shorts spor")) {
             try {
                 Repo.search(q).forEach { v ->
                     val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull).fold(0L) { total, part -> total * 60 + part }
@@ -74,7 +74,7 @@ class MainVM : ViewModel() {
             } catch (e: CancellationException) { throw e } catch (e: Throwable) {
                 Log.w("VYRO", "Shorts sorgusu basarisiz: $q", e)
             }
-            if (found.size >= 24) break
+            if (found.size >= 20) break
         }
         shorts = found.values.take(30)
         Log.i("VYRO", "Shorts yuklendi: ${shorts.size}")
