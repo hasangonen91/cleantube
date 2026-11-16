@@ -106,7 +106,7 @@ class MainVM : ViewModel() {
         val i = Repo.resolve(id)
         synchronized(infoCache) {
             infoCache[id] = i
-            while (infoCache.size > 8) infoCache.remove(infoCache.keys.first())
+            while (infoCache.size > 4) infoCache.remove(infoCache.keys.first())
         }
         return i
     }
