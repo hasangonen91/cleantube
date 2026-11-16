@@ -28,14 +28,16 @@ object InnerTube {
         return v
     }
 
-    private suspend fun browse(id: String): JSONObject = withContext(Dispatchers.IO) {
+    data class BrowsePage(val videos: List<Video>, val playlists: List<PlaylistItem> = emptyList(), val continuation: String? = null)
+
+    private suspend fun browseRequest(payload: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         val cookie = Auth.cookies ?: error("Giriş yapılmadı")
         val ver = clientVersion()
         val ctx = JSONObject().put(
             "client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR")
         )
-        val body = JSONObject().put("context", ctx).put("browseId", id).toString()
-            .toRequestBody("application/json".toMediaType())
+        payload.put("context", ctx)
+        val body = payload.toString().toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url("$O/youtubei/v1/browse?prettyPrint=false").post(body)
             .header("Cookie", cookie)
             .header("Authorization", Auth.authHeader())
@@ -51,17 +53,83 @@ object InnerTube {
         }
     }
 
-    suspend fun videos(browseId: String): List<Video> {
-        val out = LinkedHashMap<String, Video>()
-        collect(browse(browseId), out, null)
-        return out.values.toList()
+    private suspend fun browse(id: String): JSONObject = browseRequest(JSONObject().put("browseId", id))
+
+    suspend fun videos(browseId: String): List<Video> = videosPage(browseId).videos
+
+    suspend fun videosPage(browseId: String, continuation: String? = null): BrowsePage {
+        val root = if (continuation != null) browseRequest(JSONObject().put("continuation", continuation)) else browse(browseId)
+        val vids = LinkedHashMap<String, Video>()
+        val pls = LinkedHashMap<String, PlaylistItem>()
+        collect(root, vids, pls)
+        return BrowsePage(vids.values.toList(), pls.values.toList(), findContinuation(root))
     }
 
-    suspend fun playlists(): List<PlaylistItem> {
-        val out = LinkedHashMap<String, Video>()
-        val pl = LinkedHashMap<String, PlaylistItem>()
-        collect(browse("FEplaylist_aggregation"), out, pl)
-        return pl.values.toList()
+    private fun findContinuation(node: Any?): String? {
+        when (node) {
+            is JSONArray -> for (i in 0 until node.length()) findContinuation(node.opt(i))?.let { return it }
+            is JSONObject -> {
+                // common continuation locations
+                node.optJSONObject("continuationCommand")?.optString("token")?.takeIf { it.isNotBlank() }?.let { return it }
+                node.optJSONObject("continuationEndpoint")?.optJSONObject("continuationCommand")?.optString("token")?.takeIf { it.isNotBlank() }?.let { return it }
+                node.optJSONObject("nextContinuationData")?.optString("continuation")?.takeIf { it.isNotBlank() }?.let { return it }
+                node.optJSONObject("reloadContinuationData")?.optString("continuation")?.takeIf { it.isNotBlank() }?.let { return it }
+                node.optString("continuation").takeIf { it.isNotBlank() && node.has("continuation") && node.opt("continuation") is String }?.let { return it }
+                node.optJSONObject("continuationItemRenderer")?.let { findContinuation(it) }?.let { return it }
+                val keys = node.keys()
+                while (keys.hasNext()) findContinuation(node.opt(keys.next()))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    suspend fun playlists(): List<PlaylistItem> = playlistsPage().playlists
+
+    suspend fun playlistsPage(continuation: String? = null): BrowsePage = videosPage("FEplaylist_aggregation", continuation)
+
+    private suspend fun post(endpoint: String, payload: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        val cookie = Auth.cookies ?: error("Giriş yapılmadı")
+        val ver = clientVersion()
+        val ctx = JSONObject().put("client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR"))
+        payload.put("context", ctx)
+        val body = payload.toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$O/youtubei/v1/$endpoint?prettyPrint=false").post(body)
+            .header("Cookie", cookie).header("Authorization", Auth.authHeader())
+            .header("X-Goog-AuthUser", "0").header("X-Origin", O).header("Origin", O).header("Referer", "$O/")
+            .header("User-Agent", UA).header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", ver)
+            .build()
+        client.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) error("İşlem başarısız (${r.code})")
+            JSONObject(r.body?.string().orEmpty().ifBlank { "{}" })
+        }
+    }
+
+    suspend fun setLike(videoId: String, like: Boolean): Result<Unit> = runCatching {
+        val ep = if (like) "like/like" else "like/removelike"
+        post(ep, JSONObject().put("target", JSONObject().put("videoId", videoId)))
+        Unit
+    }
+
+    suspend fun subscribe(channelId: String, subscribe: Boolean): Result<Unit> = runCatching {
+        val ep = if (subscribe) "subscription/subscribe" else "subscription/unsubscribe"
+        post(ep, JSONObject().put("channelIds", JSONArray().put(channelId)).put("params", ""))
+        Unit
+    }
+
+    suspend fun addToPlaylist(videoId: String, playlistId: String): Result<Unit> = runCatching {
+        val action = JSONObject().put("addedVideoId", videoId).put("action", "ACTION_ADD_VIDEO")
+        post("browse/edit_playlist", JSONObject().put("playlistId", playlistId.removePrefix("VL")).put("actions", JSONArray().put(action)))
+        Unit
+    }
+
+    suspend fun postComment(videoId: String, text: String): Result<Unit> = runCatching {
+        // Best-effort: endpoint/params may require additional context tokens in some cases.
+        val params = "Eg0SC" + android.util.Base64.encodeToString(videoId.toByteArray(), android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
+        val payload = JSONObject()
+            .put("commentText", text)
+            .put("createCommentParams", params)
+        post("comment/create_comment", payload)
+        Unit
     }
 
     private val SKIP = setOf("adSlotRenderer", "adPlacementRenderer", "promotedSparklesWebRenderer", "displayAdRenderer")

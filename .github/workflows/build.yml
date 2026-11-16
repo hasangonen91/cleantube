@@ -14,16 +14,39 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: 8.7 }
-      - run: gradle assembleDebug --stacktrace
-      - run: cp app/build/outputs/apk/debug/app-debug.apk CleanTube.apk
+      - name: Build debug
+        run: gradle assembleDebug --stacktrace
+      - name: Build release (signed if secrets provided)
+        env:
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_PATH" ] && [ -f "$KEYSTORE_PATH" ]; then
+            gradle assembleRelease --stacktrace
+          else
+            echo "Release signing secrets/path not available; skipping signed release build."
+          fi
+      - name: Prepare artifacts
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk CleanTube-debug.apk
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk CleanTube-release.apk
+          fi
       - uses: actions/upload-artifact@v4
-        with: { name: CleanTube-apk, path: CleanTube.apk }
+        with:
+          name: CleanTube-apk
+          path: |
+            CleanTube-debug.apk
+            CleanTube-release.apk
+          if-no-files-found: ignore
       - uses: ncipollo/release-action@v1
         with:
           tag: latest
           name: CleanTube (son derleme)
-          artifacts: CleanTube.apk
+          artifacts: "CleanTube-debug.apk,CleanTube-release.apk"
           allowUpdates: true
           removeArtifacts: true
           prerelease: true
-          body: "Otomatik derleme. APK'yi indirip kurmak icin CleanTube.apk dosyasina dokun."
+          body: "Otomatik derleme. Debug APK her zaman üretilir; imzalama secret'ları tanımlıysa release APK da eklenir."
