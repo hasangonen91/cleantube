@@ -42,6 +42,7 @@ import com.cleantube.app.data.fmtViews
 import kotlinx.coroutines.CancellationException
 import org.schabi.newpipe.extractor.stream.StreamInfo
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(vm: MainVM, video: Video) {
     val ctx = LocalContext.current
