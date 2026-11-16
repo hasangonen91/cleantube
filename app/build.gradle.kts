@@ -17,7 +17,12 @@ android {
         debug { isDebuggable = false }
         // Yalnizca CI emulator testi icin: debug + test alicisi (src/ci). Teslim edilen APK bu degil.
         create("ci") { initWith(getByName("debug")); isDebuggable = false }
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            // CI signing keeps the release APK installable without exposing a private upload key.
+            // A stable production signing key should replace this before Play Store publication.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
