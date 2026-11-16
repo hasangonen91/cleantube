@@ -28,6 +28,7 @@ class MainVM : ViewModel() {
     var shortsIndex by mutableIntStateOf(0)
 
     var query by mutableStateOf("")
+    var suggestions by mutableStateOf<List<String>>(emptyList())
     var results by mutableStateOf<List<Video>>(emptyList())
     var searching by mutableStateOf(false)
     var searchError by mutableStateOf<String?>(null)
@@ -108,9 +109,16 @@ class MainVM : ViewModel() {
         return i
     }
 
+    fun suggest(value: String) = viewModelScope.launch(safe) {
+        kotlinx.coroutines.delay(250)
+        if (query != value || value.isBlank()) { suggestions = emptyList(); return@launch }
+        suggestions = runCatching { InnerTube.suggestions(value) }.getOrDefault(emptyList())
+    }
+
     fun search() = viewModelScope.launch(safe) {
         val q = query.trim()
         if (q.isEmpty()) return@launch
+        suggestions = emptyList()
         searching = true; searchError = null
         try { results = Repo.search(q) } catch (e: CancellationException) { throw e } catch (e: Throwable) { searchError = friendly(e, "Arama başarısız") }
         searching = false
