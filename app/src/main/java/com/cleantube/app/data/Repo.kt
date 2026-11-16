@@ -59,27 +59,36 @@ object Repo {
         (info.videoOnlyStreams.progressive().map { it.height } + info.videoStreams.progressive().map { it.height })
             .filter { it > 0 }.distinct().sortedDescending()
 
-    fun buildSource(info: StreamInfo, maxHeight: Int, f: DataSource.Factory): MediaSource? {
-        val pf = ProgressiveMediaSource.Factory(f)
-        fun src(url: String) = pf.createMediaSource(MediaItem.fromUri(url))
+    fun buildSource(info: StreamInfo, maxHeight: Int, f: DataSource.Factory): MediaSource? = runCatching {
+        val progressiveFactory = ProgressiveMediaSource.Factory(f)
+        fun source(url: String) = progressiveFactory.createMediaSource(MediaItem.fromUri(url))
 
-        val vOnly = info.videoOnlyStreams.progressive().filter { it.height in 1..maxHeight }
-        val audios = info.audioStreams.progressive()
-        // 1) MP4 video + M4A ses
-        val mp4v = vOnly.filter { it.format == MediaFormat.MPEG_4 }.maxByOrNull { it.height }
-        val m4a = audios.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-        if (mp4v != null && m4a != null) return MergingMediaSource(src(mp4v.content), src(m4a.content))
-        // 2) WebM video + WebM ses
-        val wv = vOnly.filter { it.format == MediaFormat.WEBM }.maxByOrNull { it.height }
-        val wa = audios.filter { it.format == MediaFormat.WEBMA }.maxByOrNull { it.averageBitrate }
-        if (wv != null && wa != null) return MergingMediaSource(src(wv.content), src(wa.content))
-        // 3) Birlesik (sesli) akis
-        val muxed = info.videoStreams.progressive().filter { it.height in 1..maxHeight }.maxByOrNull { it.height }
+        // Prefer a single progressive stream with audio + video for maximum device compatibility.
+        val muxed = info.videoStreams.progressive()
+            .filter { it.height in 1..maxHeight }
+            .maxByOrNull { it.height }
             ?: info.videoStreams.progressive().maxByOrNull { it.height }
-        if (muxed != null) return src(muxed.content)
-        // 4) Canli yayin / HLS
+        if (muxed != null) return@runCatching source(muxed.content)
+
+        // Fall back to separate tracks only when a muxed stream is unavailable.
+        val videoOnly = info.videoOnlyStreams.progressive().filter { it.height in 1..maxHeight }
+        val audioOnly = info.audioStreams.progressive()
+        val mp4Video = videoOnly.filter { it.format == MediaFormat.MPEG_4 }.maxByOrNull { it.height }
+        val m4aAudio = audioOnly.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+        if (mp4Video != null && m4aAudio != null) {
+            return@runCatching MergingMediaSource(source(mp4Video.content), source(m4aAudio.content))
+        }
+
+        val webmVideo = videoOnly.filter { it.format == MediaFormat.WEBM }.maxByOrNull { it.height }
+        val webmAudio = audioOnly.filter { it.format == MediaFormat.WEBMA }.maxByOrNull { it.averageBitrate }
+        if (webmVideo != null && webmAudio != null) {
+            return@runCatching MergingMediaSource(source(webmVideo.content), source(webmAudio.content))
+        }
+
         val hls = info.hlsUrl
-        if (!hls.isNullOrBlank()) return HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls))
-        return null
-    }
+        if (!hls.isNullOrBlank()) {
+            return@runCatching HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls))
+        }
+        null
+    }.getOrNull()
 }
