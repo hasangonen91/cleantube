@@ -5,6 +5,7 @@ package com.cleantube.app.data
 import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -83,6 +84,11 @@ object Repo {
         val webmAudio = audioOnly.filter { it.format == MediaFormat.WEBMA }.maxByOrNull { it.averageBitrate }
         if (webmVideo != null && webmAudio != null) {
             return@runCatching MergingMediaSource(source(webmVideo.content), source(webmAudio.content))
+        }
+
+        val dash = info.dashMpdUrl
+        if (!dash.isNullOrBlank()) {
+            return@runCatching DashMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(dash))
         }
 
         val hls = info.hlsUrl
