@@ -19,5 +19,12 @@ object Prefs {
         get() = try { sp?.getInt("quality", 0) ?: mem } catch (_: Throwable) { mem }
         set(v) { mem = v; try { sp?.edit()?.putInt("quality", v)?.apply() } catch (_: Throwable) {} }
 
+    /** Ses modu: video parçasını hiç istemez; yalnızca düşük bitrate ses akışını seçer. */
+    var audioOnly: Boolean
+        get() = try { sp?.getBoolean("audio_only", false) ?: false } catch (_: Throwable) { false }
+        set(v) { try { sp?.edit()?.putBoolean("audio_only", v)?.apply() } catch (_: Throwable) {} }
+
+    const val MAX_AUDIO_BITRATE = 96
+
     fun heightFor(q: Int): Int = if (q > 0) q else AUTO_HEIGHT
 }
