@@ -277,15 +277,27 @@ fun LibraryScreen(vm: MainVM) {
         } else {
             Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { vm.openSection(null) }) { Icon(Icons.Filled.ArrowBack, "Geri") }
-                Text(s.title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(s.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                if (!s.isPlaylists && s.browseId != "FEmusic" && vm.libVideos.isNotEmpty()) {
+                    TextButton(onClick = { vm.play(vm.libVideos.first(), vm.libVideos) }) { Text("Tümünü oynat") }
+                }
             }
             when {
                 vm.libLoading -> Loading()
                 vm.libError != null -> ErrorView(vm.libError!!) { vm.openSection(s) }
-                s.isPlaylists || s.browseId == "FEmusic" -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(vm.libPlaylists, key = { it.id }) { p ->
-                        ListItem(headlineContent = { Text(p.title) }, modifier = Modifier.clickable { vm.openSection(Section(p.title, if (p.id.startsWith("VL")) p.id else "VL" + p.id)) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent))
+                s.isPlaylists || s.browseId == "FEmusic" -> {
+                    if (vm.libPlaylists.isEmpty()) {
+                        ErrorView("Burada gösterilecek mix veya oynatma listesi bulunamadı.", null)
+                    } else LazyColumn(Modifier.fillMaxSize()) {
+                        items(vm.libPlaylists, key = { it.id }) { p ->
+                            ListItem(
+                                leadingContent = { Icon(Icons.Filled.QueueMusic, null) },
+                                headlineContent = { Text(p.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text("Oynatma listesini aç") },
+                                modifier = Modifier.clickable { vm.openSection(Section(p.title, if (p.id.startsWith("VL")) p.id else "VL" + p.id)) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
                     }
                 }
                 vm.libVideos.isEmpty() -> ErrorView("Burada gösterilecek bir şey bulunamadı.", null)
