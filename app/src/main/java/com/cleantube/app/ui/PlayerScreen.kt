@@ -63,10 +63,12 @@ fun PlayerScreen(vm: MainVM, video: Video) {
 
     val activePlayer = rememberServicePlayer { error = it }
     if (activePlayer == null) {
-        Box(Modifier.fillMaxSize(), Alignment.Center) {
-            if (error == null) CircularProgressIndicator() else Text(error!!, Modifier.padding(16.dp))
+        if (vm.playerExpanded) {
+            Box(Modifier.fillMaxSize(), Alignment.Center) {
+                if (error == null) CircularProgressIndicator() else Text(error!!, Modifier.padding(16.dp))
+            }
         }
-        BackHandler { vm.closePlayer() }
+        BackHandler(enabled = vm.playerExpanded) { vm.closePlayer() }
         return
     }
     // Ekran kapanip uygulama arka plana gecince servis oynatmaya devam eder.
@@ -143,7 +145,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
             error = e.localizedMessage ?: "Video hazırlanırken hata oluştu."
         }
     }
-    BackHandler { if (full) full = false else vm.minimizePlayer() }
+    BackHandler(enabled = vm.playerExpanded) { if (full) full = false else vm.minimizePlayer() }
 
     val playerView: @Composable (Modifier) -> Unit = { m ->
         AndroidView(
@@ -170,7 +172,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         )
     }
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    if (vm.playerExpanded) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (full) {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 playerView(Modifier.fillMaxSize())
