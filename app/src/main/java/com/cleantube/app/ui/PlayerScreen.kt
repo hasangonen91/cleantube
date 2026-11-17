@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.consume
 import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -157,6 +156,14 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(20_000)
                 .setReadTimeoutMs(30_000)
+            if (!audioOnly) {
+                // Secilen cozunurlukteki track'i zorla; sadece ust sinir koymak kaliteyi degistirmeyebilir.
+                val selection = activePlayer.trackSelectionParameters.buildUpon()
+                    .setMinVideoSize(0, if (qualitySel == 0) 0 else maxH)
+                    .setMaxVideoSize(Int.MAX_VALUE, maxH)
+                    .build()
+                activePlayer.trackSelectionParameters = selection
+            }
             val list = if (audioOnly) Repo.audioCandidates(i, factory) else Repo.candidates(i, maxH, factory)
             if (list.isEmpty()) {
                 error = if (audioOnly) "Bu video için düşük veri tüketimli ses akışı bulunamadı." else "Bu video için uyumlu bir akış bulunamadı."
@@ -258,7 +265,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         }
         if (showQ && !audioOnly) {
             QualitySheet(
-                options = info?.let { Repo.qualities(it) }?.takeIf { it.isNotEmpty() } ?: Prefs.DEFAULT_QUALITIES,
+                options = info?.let { Repo.qualities(it) }?.takeIf { it.isNotEmpty() } ?: listOf(Prefs.AUTO_HEIGHT),
                 selected = qualitySel,
                 onSelect = { Prefs.quality = it; qualitySel = it; showQ = false },
                 onDismiss = { showQ = false },
