@@ -271,12 +271,16 @@ fun MiniPlayer(vm: MainVM) {
     val player = PlaybackService.sharedPlayer
     var isPlaying by remember(player) { mutableStateOf(player?.isPlaying == true) }
     DisposableEffect(player) {
-        val p = player ?: return@DisposableEffect onDispose { }
-        val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+        val p = player
+        if (p == null) {
+            onDispose { }
+        } else {
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            }
+            p.addListener(listener)
+            onDispose { p.removeListener(listener) }
         }
-        p.addListener(listener)
-        onDispose { p.removeListener(listener) }
     }
     Row(
         Modifier.fillMaxWidth().height(68.dp)
