@@ -8,8 +8,12 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.consume
 import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,6 +59,27 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     var audioOnly by remember { mutableStateOf(Prefs.audioOnly) }
     val maxH = Prefs.heightFor(qualitySel)
     var full by remember { mutableStateOf(false) }
+    var dragOffset by remember(video.id) { mutableFloatStateOf(0f) }
+    val dragToMiniModifier = Modifier
+        .graphicsLayer { translationY = dragOffset }
+        .pointerInput(video.id) {
+            detectVerticalDragGestures(
+                onVerticalDrag = { change, amount ->
+                    if (amount > 0f) {
+                        dragOffset = (dragOffset + amount).coerceIn(0f, 260f)
+                        change.consume()
+                    }
+                },
+                onDragEnd = {
+                    if (dragOffset > 96.dp.toPx()) {
+                        dragOffset = 0f
+                        full = false
+                        vm.minimizePlayer()
+                    } else dragOffset = 0f
+                },
+                onDragCancel = { dragOffset = 0f },
+            )
+        }
     var showQ by remember { mutableStateOf(false) }
     var showComments by remember { mutableStateOf(false) }
     var comments by remember(video.id) { mutableStateOf<List<CommentItem>>(emptyList()) }
@@ -176,13 +201,13 @@ fun PlayerScreen(vm: MainVM, video: Video) {
 
     if (vm.playerExpanded) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (full) {
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Box(Modifier.fillMaxSize().background(Color.Black).then(dragToMiniModifier)) {
                 playerView(Modifier.fillMaxSize())
                 overlay(Modifier.fillMaxSize())
             }
         } else {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).then(dragToMiniModifier)) {
                     if (audioOnly) {
                         Column(Modifier.fillMaxSize().background(Color(0xFF10131D)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             Text("♫", color = MaterialTheme.colorScheme.primary, fontSize = 76.sp)
