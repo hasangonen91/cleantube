@@ -63,6 +63,24 @@ object Repo {
             .filter { it > 0 }.distinct().sortedDescending()
 
     /**
+     * Yalnizca ses kaynaklari. Video stream'i eklenmez; tercih edilen bitrate 96 kbps
+     * altindaki M4A, bulunamazsa en dusuk bitrate'li progressive ses akisi.
+     */
+    fun audioCandidates(info: StreamInfo, f: DataSource.Factory, maxBitrate: Int = Prefs.MAX_AUDIO_BITRATE): List<() -> MediaSource> {
+        val streams = info.audioStreams.filter {
+            it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && it.isUrl
+        }
+        val preferred = streams.filter { it.averageBitrate in 1..maxBitrate }
+        val selected = preferred.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+            ?: preferred.maxByOrNull { it.averageBitrate }
+            ?: streams.filter { it.format == MediaFormat.M4A }.minByOrNull { it.averageBitrate }
+            ?: streams.minByOrNull { it.averageBitrate }
+            ?: return emptyList()
+        val source = ProgressiveMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(selected.content))
+        return listOf({ source })
+    }
+
+    /**
      * Oynatma icin SIRALI aday kaynaklar. Biri hata verirse oynatici siradakini dener
      * (progressive -> ayri ses/goruntu birlestirme -> DASH -> HLS). Her aday tembel uretilir.
      */
