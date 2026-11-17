@@ -107,7 +107,7 @@ fun ShortsScreen(vm: MainVM) {
         val p = player
         onDispose {
             if (p != null && vm.playing == null) runCatching {
-                p.stop(); p.clearMediaItems(); p.repeatMode = Player.REPEAT_MODE_OFF; p.volume = 1f
+                p.pause(); p.clearMediaItems(); p.repeatMode = Player.REPEAT_MODE_OFF; p.volume = 1f
             }
         }
     }
@@ -118,7 +118,8 @@ fun ShortsScreen(vm: MainVM) {
         val video = vm.shorts.getOrNull(page) ?: return@LaunchedEffect
         error = null; ready = false; userPaused = false; progress = 0f
         runCatching {
-            p.stop(); p.clearMediaItems()
+            p.pause()
+            p.clearMediaItems()
             p.repeatMode = Player.REPEAT_MODE_ONE
             p.volume = if (muted) 0f else 1f
         }
@@ -133,7 +134,9 @@ fun ShortsScreen(vm: MainVM) {
             if (list.isEmpty()) { error = "Bu Shorts için akış bulunamadı."; return@LaunchedEffect }
             chain.reset(list, 0L)
             chain.tryNext(p)
-            vm.shorts.getOrNull(page + 1)?.let { n -> launch { runCatching { vm.streamInfo(n.id) } } }
+            // Prefetch, sayfa değişince iptal edilmeyen ViewModel işi olarak yürür.
+            vm.shorts.getOrNull(page + 1)?.let { vm.prefetchStreamInfo(it.id) }
+            vm.shorts.getOrNull(page + 2)?.let { vm.prefetchStreamInfo(it.id) }
         } catch (e: CancellationException) { throw e }
         catch (t: Throwable) {
             Log.w("VYRO", "Shorts cozulemedi", t)
@@ -145,7 +148,7 @@ fun ShortsScreen(vm: MainVM) {
         while (true) {
             val d = p.duration
             progress = if (d > 0) (p.currentPosition.toFloat() / d).coerceIn(0f, 1f) else 0f
-            delay(250)
+            delay(500)
         }
     }
 
