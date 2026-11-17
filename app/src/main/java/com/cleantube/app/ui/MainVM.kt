@@ -55,17 +55,32 @@ class MainVM : ViewModel() {
         }
     }
 
-    fun refreshHome() { homeScrollRequest++; loadHome() }
+    private var homeJob: Job? = null
 
-    fun loadHome() = viewModelScope.launch(safe) {
-        categoryIndex = 0
-        homeLoading = true; homeError = null
-        try {
-            home = if (Auth.loggedIn) {
-                runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Repo.trending()
-            } else Repo.trending()
-        } catch (e: CancellationException) { throw e } catch (e: Throwable) { homeError = friendly(e, "Yüklenemedi") }
-        homeLoading = false
+    fun refreshHome() {
+        homeScrollRequest++
+        loadHome()
+    }
+
+    fun loadHome() {
+        homeJob?.cancel()
+        homeJob = viewModelScope.launch(safe) {
+            categoryIndex = 0
+            homeLoading = true
+            homeError = null
+            try {
+                val fresh = if (Auth.loggedIn) {
+                    runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Repo.trending()
+                } else Repo.trending()
+                home = fresh
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                homeError = friendly(e, "Yüklenemedi")
+            } finally {
+                homeLoading = false
+            }
+        }
     }
 
     private val shortsQueries = listOf(
