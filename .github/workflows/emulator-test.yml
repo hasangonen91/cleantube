@@ -2,7 +2,7 @@ name: Emulator smoke test
 on:
   workflow_dispatch:
   push:
-    branches: ["fix/**"]
+    branches: ["fix/**", "feature/**"]
 permissions:
   contents: write
 jobs:
