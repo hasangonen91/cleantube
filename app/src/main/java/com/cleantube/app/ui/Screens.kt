@@ -320,7 +320,7 @@ fun AppRoot(vm: MainVM) {
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (vm.tab) { 0 -> HomeScreen(vm); 1 -> ShortsScreen(vm); 2 -> SearchScreen(vm); else -> LibraryScreen(vm) }
+            if (vm.playing != null && vm.playerExpanded) PlayerScreen(vm, vm.playing!!)
         }
     }
-    if (vm.playing != null && vm.playerExpanded) PlayerScreen(vm, vm.playing!!)
 }
