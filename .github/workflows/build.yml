@@ -5,6 +5,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+
+concurrency:
+  group: vyro-build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
