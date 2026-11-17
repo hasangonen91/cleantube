@@ -291,7 +291,7 @@ fun LibraryScreen(vm: MainVM) {
                     } else LazyColumn(Modifier.fillMaxSize()) {
                         items(vm.libPlaylists, key = { it.id }) { p ->
                             ListItem(
-                                leadingContent = { Icon(Icons.Filled.QueueMusic, null) },
+                                leadingContent = { Icon(Icons.Filled.PlayArrow, null) },
                                 headlineContent = { Text(p.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                                 supportingContent = { Text("Oynatma listesini aç") },
                                 modifier = Modifier.clickable { vm.openSection(Section(p.title, if (p.id.startsWith("VL")) p.id else "VL" + p.id)) },
