@@ -281,9 +281,10 @@ fun MiniPlayer(vm: MainVM) {
             delay(50)
         }
     }
-    var isPlaying by remember(player) { mutableStateOf(player?.isPlaying == true) }
-    DisposableEffect(player) {
-        val p = player
+    val activePlayer = player
+    var isPlaying by remember(activePlayer) { mutableStateOf(activePlayer?.isPlaying == true) }
+    DisposableEffect(activePlayer) {
+        val p = activePlayer
         if (p == null) {
             onDispose { }
         } else {
@@ -301,17 +302,17 @@ fun MiniPlayer(vm: MainVM) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(112.dp).height(64.dp).background(Color.Black)) {
-            if (player != null) {
+            if (activePlayer != null) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
                         PlayerView(context).apply {
-                            this.player = player
+                            this.player = activePlayer
                             useController = false
                             setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                         }
                     },
-                    update = { it.player = player },
+                    update = { it.player = activePlayer },
                     onRelease = { it.player = null },
                 )
             } else {
@@ -325,10 +326,10 @@ fun MiniPlayer(vm: MainVM) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         IconButton(onClick = {
-            if (player?.isPlaying == true) player.pause() else player?.play()
+            if (activePlayer?.isPlaying == true) activePlayer.pause() else activePlayer?.play()
         }) { Text(if (isPlaying) "Ⅱ" else "▶", fontSize = 20.sp) }
         IconButton(onClick = {
-            runCatching { player?.pause(); player?.stop(); player?.clearMediaItems() }
+            runCatching { activePlayer?.pause(); activePlayer?.stop(); activePlayer?.clearMediaItems() }
             vm.closePlayer()
         }) { Text("✕", fontSize = 18.sp) }
     }
