@@ -27,6 +27,10 @@ sleep 12; alive "t+20s"; texts "01_home"
 tap_text "Shorts" ; sleep 25; alive "shorts"; texts "02_shorts"
 adb shell input swipe 540 1700 540 500 300; sleep 6; alive "shorts-kaydir"; texts "02b_shorts_swipe"
 adb shell input tap 540 1000; sleep 1; texts "02c_shorts_tap"
+tap_text "Yorum"; sleep 8; alive "shorts-yorumlar"; texts "02d_shorts_comments"
+adb shell input keyevent 4; sleep 2; alive "shorts-comments-back"
+adb shell input keyevent 4; sleep 2; alive "shorts-home-back"; texts "02e_back_to_home"
+adb shell input swipe 540 420 540 1500 500; sleep 5; alive "home-pull-refresh"; texts "02f_home_refresh"
 tap_text "Ara";     sleep 2
 dump; xy=$(python3 scripts/ui_tap.py "$UI" edit) && adb shell input tap $xy; sleep 1
 adb shell input text "music"; sleep 1; adb shell input keyevent 66
