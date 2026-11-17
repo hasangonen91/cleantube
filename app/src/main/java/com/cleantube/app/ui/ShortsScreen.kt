@@ -79,7 +79,9 @@ fun ShortsScreen(vm: MainVM) {
     var saved by remember(page) { mutableStateOf(false) }
     var comments by remember(page) { mutableStateOf<List<CommentItem>>(emptyList()) }
     var commentsLoading by remember(page) { mutableStateOf(false) }
+    var commentsRetry by remember(page) { mutableIntStateOf(0) }
     var commentsError by remember(page) { mutableStateOf<String?>(null) }
+    var availableQualities by remember(page) { mutableStateOf(Prefs.DEFAULT_QUALITIES) }
     var fullScreen by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -147,7 +149,13 @@ fun ShortsScreen(vm: MainVM) {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(20_000)
                 .setReadTimeoutMs(30_000)
-            val list = Repo.candidates(info, Prefs.heightFor(quality), factory)
+            val maxHeight = Prefs.heightFor(quality)
+            availableQualities = Repo.qualities(info).ifEmpty { listOf(Prefs.AUTO_HEIGHT) }
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setMinVideoSize(0, if (quality == 0) 0 else maxHeight)
+                .setMaxVideoSize(Int.MAX_VALUE, maxHeight)
+                .build()
+            val list = Repo.candidates(info, maxHeight, factory)
             if (list.isEmpty()) { error = "Bu Shorts için akış bulunamadı."; return@LaunchedEffect }
             chain.reset(list, 0L)
             chain.tryNext(p)
@@ -270,7 +278,7 @@ fun ShortsScreen(vm: MainVM) {
     }
     if (showQ) {
         QualitySheet(
-            options = Prefs.DEFAULT_QUALITIES, selected = quality,
+            options = availableQualities, selected = quality,
             onSelect = { Prefs.quality = it; quality = it; showQ = false },
             onDismiss = { showQ = false },
         )
@@ -305,7 +313,10 @@ fun ShortsScreen(vm: MainVM) {
                 Spacer(Modifier.height(12.dp))
                 when {
                     commentsLoading -> Box(Modifier.fillMaxWidth().height(120.dp), Alignment.Center) { CircularProgressIndicator() }
-                    commentsError != null -> Text(commentsError!!, color = MaterialTheme.colorScheme.error)
+                    commentsError != null -> Column {
+                        Text(commentsError!!, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = { commentsRetry++ }) { Text("Tekrar dene") }
+                    }
                     comments.isEmpty() -> Text("Herkese açık yorum bulunamadı.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else -> androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
                         items(comments, key = { it.id }) { comment ->
@@ -324,13 +335,20 @@ fun ShortsScreen(vm: MainVM) {
                     }
                 }
             }
-            LaunchedEffect(activeVideo?.id) {
+            LaunchedEffect(activeVideo?.id, commentsRetry) {
                 commentsLoading = true
                 commentsError = null
-                try { comments = activeVideo?.let { InnerTube.comments(it.id) }.orEmpty() }
-                catch (e: CancellationException) { throw e }
-                catch (e: Throwable) { commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi" }
-                commentsLoading = false
+                try {
+                    comments = activeVideo?.let { InnerTube.comments(it.id) }.orEmpty()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    comments = emptyList()
+                    commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi"
+                    Log.w("VYRO", "Shorts yorumlari yuklenemedi: ${activeVideo?.id}", e)
+                } finally {
+                    commentsLoading = false
+                }
             }
         }
     }
