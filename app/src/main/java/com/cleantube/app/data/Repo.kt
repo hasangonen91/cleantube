@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.MediaFormat
+import org.schabi.newpipe.extractor.comments.CommentsInfo
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
@@ -48,6 +49,25 @@ object Repo {
 
     suspend fun resolve(id: String): StreamInfo = withContext(Dispatchers.IO) {
         StreamInfo.getInfo("https://www.youtube.com/watch?v=$id")
+    }
+
+    /** NewPipe'in YouTube yorum ayrıştırıcısı modern yorum entity'lerini ve continuation sayfalarını yönetir. */
+    suspend fun comments(videoId: String): List<CommentItem> = withContext(Dispatchers.IO) {
+        val url = "https://www.youtube.com/watch?v=$videoId"
+        val info = CommentsInfo.getInfo(yt, url) ?: return@withContext emptyList()
+        if (info.isCommentsDisabled) return@withContext emptyList()
+        info.relatedItems.mapNotNull { item ->
+            val id = item.commentId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val text = item.commentText.content().trim()
+            if (text.isBlank()) return@mapNotNull null
+            CommentItem(
+                id = id,
+                author = item.uploaderName.orEmpty(),
+                text = text,
+                likes = item.textualLikeCount.orEmpty(),
+                avatar = item.uploaderAvatars.firstOrNull()?.url.orEmpty(),
+            )
+        }.distinctBy { it.id }.take(50)
     }
 
     fun related(info: StreamInfo): List<Video> =
