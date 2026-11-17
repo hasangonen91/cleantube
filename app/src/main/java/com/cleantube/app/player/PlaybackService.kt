@@ -41,7 +41,11 @@ class PlaybackService : MediaSessionService() {
         sharedPlayer = exoPlayer
         // Shorts için ayrı oynatıcı: mini oynatıcıdaki normal videonun kaynağını ezmez.
         shortsExoPlayer = ExoPlayer.Builder(this)
-            .setLoadControl(loadControl)
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(10_000, 20_000, 1_000, 2_000)
+                    .build()
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 true,
