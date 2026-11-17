@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import coil.compose.AsyncImage
@@ -38,6 +39,7 @@ import com.cleantube.app.data.Prefs
 import com.cleantube.app.data.Repo
 import com.cleantube.app.data.Video
 import com.cleantube.app.data.fmtViews
+import com.cleantube.app.player.PlaybackService
 import kotlinx.coroutines.CancellationException
 import org.schabi.newpipe.extractor.stream.StreamInfo
 
@@ -77,9 +79,13 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         val listener = object : Player.Listener {
             override fun onPlayerError(playbackError: PlaybackException) {
                 Log.w("VYRO", "Oynatma hatasi: ${playbackError.errorCodeName}", playbackError)
-                // Guvenilir fallback: siradaki kaynagi dene; hepsi tukenirse mesaj goster.
                 if (!fb.tryNext(activePlayer)) {
                     error = playbackError.localizedMessage ?: "Video akışı oynatılamadı"
+                }
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED && vm.queueIndex >= 0 && vm.queueIndex < vm.queue.lastIndex) {
+                    vm.playNext()
                 }
             }
         }
@@ -141,7 +147,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
             error = e.localizedMessage ?: "Video hazırlanırken hata oluştu."
         }
     }
-    BackHandler { if (full) full = false else closePlayer() }
+    BackHandler { if (full) full = false else vm.minimizePlayer() }
 
     val playerView: @Composable (Modifier) -> Unit = { m ->
         AndroidView(
@@ -158,7 +164,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     val overlay: @Composable (Modifier) -> Unit = { m ->
         PlayerOverlay(
             player = activePlayer, full = full,
-            onClose = { if (full) full = false else closePlayer() },
+            onClose = { if (full) full = false else vm.minimizePlayer() },
             onFullscreen = { full = !full },
             onSettings = { showQ = true },
             onNext = { info?.let { Repo.related(it).firstOrNull() }?.let { vm.playing = it } },
@@ -255,5 +261,60 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 }
             }
         }
+    }
+}
+
+
+/** Sekme değiştirildiğinde aynı servis oynatıcısını altta tutar; video kesilmez. */
+@Composable
+fun MiniPlayer(vm: MainVM) {
+    val video = vm.playing ?: return
+    val player = PlaybackService.sharedPlayer
+    var isPlaying by remember(player) { mutableStateOf(player?.isPlaying == true) }
+    DisposableEffect(player) {
+        val p = player ?: return@DisposableEffect onDispose { }
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+        }
+        p.addListener(listener)
+        onDispose { p.removeListener(listener) }
+    }
+    Row(
+        Modifier.fillMaxWidth().height(68.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { vm.expandPlayer() },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(112.dp).height(64.dp).background(Color.Black)) {
+            if (player != null) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        PlayerView(context).apply {
+                            this.player = player
+                            useController = false
+                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        }
+                    },
+                    update = { it.player = player },
+                    onRelease = { it.player = null },
+                )
+            } else {
+                AsyncImage(video.thumb, null, Modifier.fillMaxSize())
+            }
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+            Text(video.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text(video.channel, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        }
+        IconButton(onClick = {
+            if (player?.isPlaying == true) player.pause() else player?.play()
+        }) { Text(if (isPlaying) "Ⅱ" else "▶", fontSize = 20.sp) }
+        IconButton(onClick = {
+            runCatching { player?.pause(); player?.stop(); player?.clearMediaItems() }
+            vm.closePlayer()
+        }) { Text("✕", fontSize = 18.sp) }
     }
 }
