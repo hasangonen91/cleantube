@@ -148,7 +148,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         catch (e: CancellationException) { throw e }
         catch (e: Throwable) { Log.w("VYRO", "Video cozulemedi", e); error = e.message ?: "Video açılamadı" }
     }
-    LaunchedEffect(info, maxH, audioOnly) {
+    LaunchedEffect(info, maxH, qualitySel, audioOnly) {
         val i = info ?: return@LaunchedEffect
         try {
             val keepPos = if (loadedFor == video.id) activePlayer.currentPosition else 0L
