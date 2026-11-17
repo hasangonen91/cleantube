@@ -83,6 +83,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     var showComments by remember { mutableStateOf(false) }
     var comments by remember(video.id) { mutableStateOf<List<CommentItem>>(emptyList()) }
     var commentsLoading by remember(video.id) { mutableStateOf(false) }
+    var commentsRetry by remember(video.id) { mutableIntStateOf(0) }
     var commentsError by remember(video.id) { mutableStateOf<String?>(null) }
     var loadedFor by remember { mutableStateOf<String?>(null) }
     val fb = remember { SourceChain() }
@@ -278,7 +279,10 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                     Spacer(Modifier.height(12.dp))
                     when {
                         commentsLoading -> Box(Modifier.fillMaxWidth().height(120.dp), Alignment.Center) { CircularProgressIndicator() }
-                        commentsError != null -> Text(commentsError!!, color = MaterialTheme.colorScheme.error)
+                        commentsError != null -> Column {
+                            Text(commentsError!!, color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = { commentsRetry++ }) { Text("Tekrar dene") }
+                        }
                         comments.isEmpty() -> Text("Bu video için herkese açık yorum bulunamadı.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
                             items(comments, key = { it.id }) { comment ->
@@ -298,13 +302,20 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                         }
                     }
                 }
-                LaunchedEffect(video.id) {
+                LaunchedEffect(video.id, commentsRetry) {
                     commentsLoading = true
                     commentsError = null
-                    try { comments = InnerTube.comments(video.id) }
-                    catch (e: CancellationException) { throw e }
-                    catch (e: Throwable) { commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi" }
-                    commentsLoading = false
+                    try {
+                        comments = InnerTube.comments(video.id)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        comments = emptyList()
+                        commentsError = e.localizedMessage ?: "Yorumlar yüklenemedi"
+                        Log.w("VYRO", "Yorumlar yuklenemedi: ${video.id}", e)
+                    } finally {
+                        commentsLoading = false
+                    }
                 }
             }
         }
