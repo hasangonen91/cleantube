@@ -11,12 +11,16 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 
 class MainVM : ViewModel() {
     var tab by mutableStateOf(0)
     var categoryIndex by mutableStateOf(0)
     var homeScrollRequest by mutableIntStateOf(0)
     var playing by mutableStateOf<Video?>(null)
+    var playerExpanded by mutableStateOf(true)
+    var queue by mutableStateOf<List<Video>>(emptyList())
+    var queueIndex by mutableIntStateOf(-1)
     var showLogin by mutableStateOf(false)
     var loggedIn by mutableStateOf(Auth.loggedIn)
 
@@ -69,35 +73,75 @@ class MainVM : ViewModel() {
         "#shorts yemek", "#shorts kedi", "#shorts tiktok", "#shorts dans", "#shorts teknoloji", "#shorts spor",
     )
     private var shortsQ = 0
+    private var shortsFetchJob: Job? = null
 
-    private suspend fun fetchShorts(minNew: Int) {
+    private fun fetchShorts(minNew: Int) {
+        if (shortsFetchJob?.isActive == true) return
         shortsLoading = true
-        val found = LinkedHashMap<String, Video>()
-        shorts.forEach { found[it.id] = it }
-        val before = found.size
-        var tries = 0
-        // Tek sorgu az sonuc verebilir; sirayla birkac sorgu deneyip kisa videolari (<=3 dk) topla.
-        while (tries < shortsQueries.size && found.size - before < minNew) {
-            val q = shortsQueries[shortsQ % shortsQueries.size]; shortsQ++; tries++
+        shortsFetchJob = viewModelScope.launch(safe) {
+            val found = LinkedHashMap<String, Video>()
+            shorts.forEach { found[it.id] = it }
+            val before = found.size
+            val maxQueries = if (before == 0) 3 else shortsQueries.size
+            var tries = 0
             try {
-                Repo.search(q).forEach { v ->
-                    val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull).fold(0L) { total, part -> total * 60 + part }
-                    if (v.short || seconds in 1..180) found.putIfAbsent(v.id, v)
+                while (tries < maxQueries && found.size - before < minNew) {
+                    val q = shortsQueries[shortsQ % shortsQueries.size]
+                    shortsQ++; tries++
+                    try {
+                        Repo.search(q).forEach { v ->
+                            val seconds = v.durationText.split(":").mapNotNull(String::toIntOrNull)
+                                .fold(0L) { total, part -> total * 60 + part }
+                            // Extractor bazen Shorts bayrağını boş döndürüyor; #shorts sorgusundaki
+                            // süresiz sonuçları da ilk ekrana alıp akış çözümlemesini oynatıcıya bırak.
+                            if (v.short || seconds in 1..180 || (q == "#shorts" && v.durationText.isBlank())) {
+                                found.putIfAbsent(v.id, v)
+                            }
+                        }
+                        if (found.size > shorts.size) shorts = found.values.toList()
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Throwable) { Log.w("VYRO", "Shorts sorgusu başarısız: $q", e) }
+                    if (shorts.isNotEmpty() && found.size - before >= minNew) break
                 }
-                // Ilk video gelir gelmez goster; kalani arkada eklenir.
-                if (found.size > shorts.size) shorts = found.values.toList()
-            } catch (e: CancellationException) { shortsLoading = false; throw e } catch (e: Throwable) {
-                Log.w("VYRO", "Shorts sorgusu basarisiz: $q", e)
+                shorts = found.values.toList()
+                Log.i("VYRO", "Shorts yüklendi: ${shorts.size}")
+            } finally {
+                shortsLoading = false
             }
         }
-        shorts = found.values.toList()
-        Log.i("VYRO", "Shorts yuklendi: ${shorts.size}")
-        shortsLoading = false
     }
 
-    fun loadShorts() = viewModelScope.launch(safe) { if (shorts.isEmpty() && !shortsLoading) fetchShorts(12) }
-    fun moreShorts() = viewModelScope.launch(safe) { if (!shortsLoading) fetchShorts(8) }
-    fun openShorts(index: Int) { shortsIndex = index; tab = 1 }
+    fun loadShorts() { if (shorts.isEmpty()) fetchShorts(12) }
+    fun moreShorts() { fetchShorts(8) }
+    fun openShorts(index: Int) { shortsIndex = index; tab = 1; if (playing != null) playerExpanded = false }
+
+    fun prefetchStreamInfo(id: String) {
+        if (id.isBlank()) return
+        viewModelScope.launch(safe) { runCatching { streamInfo(id) } }
+    }
+
+    fun play(video: Video, fromList: List<Video> = emptyList()) {
+        val list = (fromList.ifEmpty { listOf(video) }).distinctBy { it.id }
+        queue = list
+        queueIndex = list.indexOfFirst { it.id == video.id }.coerceAtLeast(0)
+        playing = video
+        playerExpanded = true
+    }
+
+    fun playNext() {
+        val next = queueIndex + 1
+        if (next in queue.indices) {
+            queueIndex = next
+            playing = queue[next]
+            playerExpanded = true
+        } else {
+            closePlayer()
+        }
+    }
+
+    fun minimizePlayer() { if (playing != null) playerExpanded = false }
+    fun expandPlayer() { if (playing != null) playerExpanded = true }
+    fun closePlayer() { playing = null; playerExpanded = false; queue = emptyList(); queueIndex = -1 }
 
     private val infoCache = LinkedHashMap<String, org.schabi.newpipe.extractor.stream.StreamInfo>()
 
@@ -107,7 +151,7 @@ class MainVM : ViewModel() {
         val i = Repo.resolve(id)
         synchronized(infoCache) {
             infoCache[id] = i
-            while (infoCache.size > 4) infoCache.remove(infoCache.keys.first())
+            while (infoCache.size > 8) infoCache.remove(infoCache.keys.first())
         }
         return i
     }
@@ -134,7 +178,11 @@ class MainVM : ViewModel() {
         viewModelScope.launch(safe) {
             libLoading = true
             try {
-                if (s.isPlaylists) libPlaylists = InnerTube.playlists() else libVideos = InnerTube.videos(s.browseId)
+                when {
+                    s.browseId == "FEmusic" -> libPlaylists = InnerTube.mixes()
+                    s.isPlaylists -> libPlaylists = InnerTube.playlists()
+                    else -> libVideos = InnerTube.videos(if (s.browseId.startsWith("VL")) s.browseId else "VL" + s.browseId)
+                }
             } catch (e: CancellationException) { throw e } catch (e: Throwable) { libError = friendly(e, "Yüklenemedi") }
             libLoading = false
         }
