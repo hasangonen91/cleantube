@@ -114,7 +114,11 @@ fun ShortsScreen(vm: MainVM) {
     // Sayfa degisince / kalite degisince yeni Shorts'u direkt oynat; sonrakini onceden coz.
     LaunchedEffect(player, active, page, quality) {
         val p = player ?: return@LaunchedEffect
-        if (!active) { p.pause(); return@LaunchedEffect }
+        if (!active) {
+            // Normal video mini oynatıcıdayken Shorts ekranı servis oynatıcısını durdurmamalı.
+            if (vm.playing == null) p.pause()
+            return@LaunchedEffect
+        }
         val video = vm.shorts.getOrNull(page) ?: return@LaunchedEffect
         error = null; ready = false; userPaused = false; progress = 0f
         runCatching {
