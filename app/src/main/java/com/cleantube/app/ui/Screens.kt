@@ -1,5 +1,6 @@
 package com.cleantube.app.ui
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,6 +42,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,18 +52,18 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.cleantube.app.data.Section
 import com.cleantube.app.data.Video
+import com.cleantube.app.R
+import com.cleantube.app.player.PlaybackService
 
 private val categories = listOf("Senin için", "Müzik", "Canlı", "Oyun", "Teknoloji", "Haberler", "Spor")
 
 @Composable
 private fun BrandMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
-    Box(
-        Modifier.size(size).clip(RoundedCornerShape(size * .32f))
-            .background(Brush.linearGradient(listOf(Color(0xFFFF315B), Color(0xFF9D1BFF), Color(0xFF3A164E)))),
-        Alignment.Center
-    ) {
-        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(size * .82f))
-    }
+    Image(
+        painter = painterResource(R.drawable.ic_vyro),
+        contentDescription = "VYRO",
+        modifier = Modifier.size(size),
+    )
 }
 
 @Composable
@@ -329,8 +332,36 @@ fun LibraryScreen(vm: MainVM) {
 @Composable
 fun AppRoot(vm: MainVM) {
     if (vm.showLogin) { LoginScreen(onDone = { vm.onLoggedIn() }, onCancel = { vm.showLogin = false }); return }
-    BackHandler(enabled = vm.tab != 0 || (vm.playing != null && !vm.playerExpanded)) {
-        if (vm.tab != 0) vm.tab = 0 else vm.closePlayer()
+    val activity = LocalContext.current as? Activity
+    var showExitDialog by remember { mutableStateOf(false) }
+    BackHandler(enabled = true) {
+        when {
+            vm.tab != 0 -> vm.tab = 0
+            vm.playing != null && !vm.playerExpanded -> {
+                PlaybackService.sharedPlayer?.let { p ->
+                    runCatching { p.pause(); p.stop(); p.clearMediaItems() }
+                }
+                vm.closePlayer()
+            }
+            else -> showExitDialog = true
+        }
+    }
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { Text("VYRO'dan çıkılsın mı?") },
+            text = { Text("Çıkarsan oynatma durdurulacak.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    PlaybackService.sharedPlayer?.let { p -> runCatching { p.pause(); p.stop(); p.clearMediaItems() } }
+                    PlaybackService.sharedShortsPlayer?.let { p -> runCatching { p.pause(); p.stop(); p.clearMediaItems() } }
+                    vm.closePlayer()
+                    showExitDialog = false
+                    activity?.finish()
+                }) { Text("Çıkış yap") }
+            },
+            dismissButton = { TextButton(onClick = { showExitDialog = false }) { Text("Vazgeç") } },
+        )
     }
     val hasMini = vm.playing != null && !vm.playerExpanded
     Scaffold(
