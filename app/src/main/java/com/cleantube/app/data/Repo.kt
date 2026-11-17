@@ -55,17 +55,17 @@ object Repo {
     suspend fun comments(videoId: String): List<CommentItem> = withContext(Dispatchers.IO) {
         val url = "https://www.youtube.com/watch?v=$videoId"
         val info = CommentsInfo.getInfo(yt, url) ?: return@withContext emptyList()
-        if (info.isCommentsDisabled) return@withContext emptyList()
-        info.relatedItems.mapNotNull { item ->
-            val id = item.commentId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val text = item.commentText.content().trim()
+        if (info.isCommentsDisabled()) return@withContext emptyList()
+        info.getRelatedItems().mapNotNull { item ->
+            val id = item.getCommentId()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val text = item.getCommentText().content().trim()
             if (text.isBlank()) return@mapNotNull null
             CommentItem(
                 id = id,
-                author = item.uploaderName.orEmpty(),
+                author = item.getUploaderName().orEmpty(),
                 text = text,
-                likes = item.textualLikeCount.orEmpty(),
-                avatar = item.uploaderAvatars.firstOrNull()?.url.orEmpty(),
+                likes = item.getTextualLikeCount().orEmpty(),
+                avatar = item.getUploaderAvatars().firstOrNull()?.getUrl().orEmpty(),
             )
         }.distinctBy { it.id }.take(50)
     }
