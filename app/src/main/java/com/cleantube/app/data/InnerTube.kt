@@ -30,21 +30,23 @@ object InnerTube {
     }
 
     private suspend fun browse(id: String): JSONObject = withContext(Dispatchers.IO) {
-        val cookie = Auth.cookies ?: error("Giriş yapılmadı")
+        val cookie = Auth.cookies
         val ver = clientVersion()
         val ctx = JSONObject().put(
             "client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR")
         )
         val body = JSONObject().put("context", ctx).put("browseId", id).toString()
             .toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url("$O/youtubei/v1/browse?prettyPrint=false").post(body)
-            .header("Cookie", cookie)
-            .header("Authorization", Auth.authHeader())
-            .header("X-Goog-AuthUser", "0")
+        val builder = Request.Builder().url("$O/youtubei/v1/browse?prettyPrint=false").post(body)
             .header("X-Origin", O).header("Origin", O).header("Referer", "$O/")
             .header("User-Agent", UA)
             .header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", ver)
-            .build()
+        if (!cookie.isNullOrBlank()) {
+            builder.header("Cookie", cookie)
+                .header("Authorization", Auth.authHeader())
+                .header("X-Goog-AuthUser", "0")
+        }
+        val req = builder.build()
         client.newCall(req).execute().use { r ->
             if (r.code == 401 || r.code == 403) error("Oturum süresi dolmuş, tekrar giriş yap")
             if (!r.isSuccessful) error("Sunucu hatası (${r.code})")
@@ -63,6 +65,14 @@ object InnerTube {
         val pl = LinkedHashMap<String, PlaylistItem>()
         collect(browse("FEplaylist_aggregation"), out, pl)
         return pl.values.toList()
+    }
+
+    /** Public music feed: Mixler oturum açmadan da listelenebilir. */
+    suspend fun mixes(): List<PlaylistItem> = withContext(Dispatchers.IO) {
+        val out = LinkedHashMap<String, Video>()
+        val pl = LinkedHashMap<String, PlaylistItem>()
+        collect(browse("FEmusic"), out, pl)
+        pl.values.toList()
     }
 
 
