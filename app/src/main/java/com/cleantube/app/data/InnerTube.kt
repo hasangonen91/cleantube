@@ -89,54 +89,121 @@ object InnerTube {
 
     suspend fun comments(videoId: String): List<CommentItem> = withContext(Dispatchers.IO) {
         val ver = clientVersion()
-        val ctx = JSONObject().put("client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR"))
-        val body = JSONObject().put("context", ctx).put("videoId", videoId).put("racyCheckOk", true).put("contentCheckOk", true)
-            .toString().toRequestBody("application/json".toMediaType())
-        val builder = Request.Builder().url("$O/youtubei/v1/next?prettyPrint=false").post(body)
-            .header("User-Agent", UA).header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", ver)
-            .header("Origin", O).header("Referer", "$O/watch?v=$videoId")
-        val cookie = Auth.cookies
-        if (!cookie.isNullOrBlank()) builder.header("Cookie", cookie).header("Authorization", Auth.authHeader()).header("X-Goog-AuthUser", "0")
-        client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) error("YouTube yorum isteği başarısız (" + response.code + ")")
-            val out = LinkedHashMap<String, CommentItem>()
-            collectComments(JSONObject(response.body?.string().orEmpty()), out)
-            out.values.toList()
-        }
+        val ctx = JSONObject().put(
+            "client",
+            JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR")
+        )
+        val out = LinkedHashMap<String, CommentItem>()
+        var token: String? = null
+        var page = 0
+        do {
+            val payload = JSONObject().put("context", ctx)
+            if (page == 0) {
+                payload.put("videoId", videoId).put("racyCheckOk", true).put("contentCheckOk", true)
+            } else {
+                payload.put("continuation", token)
+            }
+            val builder = Request.Builder().url("$O/youtubei/v1/next?prettyPrint=false")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", UA)
+                .header("X-Youtube-Client-Name", "1")
+                .header("X-Youtube-Client-Version", ver)
+                .header("Origin", O)
+                .header("Referer", "$O/watch?v=$videoId")
+            val cookie = Auth.cookies
+            if (!cookie.isNullOrBlank()) {
+                builder.header("Cookie", cookie)
+                    .header("Authorization", Auth.authHeader())
+                    .header("X-Goog-AuthUser", "0")
+            }
+            val json = client.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) error("YouTube yorum isteği başarısız (${response.code})")
+                JSONObject(response.body?.string().orEmpty())
+            }
+            collectComments(json, out)
+            token = if (out.isEmpty()) firstCommentContinuation(json) else null
+            page++
+        } while (out.isEmpty() && !token.isNullOrBlank() && page < 3)
+        out.values.toList()
     }
+
+    /** İlk /next cevabı çoğu zaman yorumları değil, yorum panelinin continuation token'ını döndürür. */
+    private fun firstCommentContinuation(root: JSONObject): String? {
+        fun scan(node: Any?, inComments: Boolean): String? {
+            when (node) {
+                is JSONArray -> {
+                    for (i in 0 until node.length()) scan(node.opt(i), inComments)?.let { return it }
+                }
+                is JSONObject -> {
+                    val panel = node.optString("panelIdentifier")
+                    val commentScope = inComments || panel.contains("comment", true) ||
+                        node.has("commentSectionRenderer") || node.has("commentsHeaderRenderer")
+                    node.optJSONObject("continuationEndpoint")?.optJSONObject("continuationCommand")
+                        ?.optString("token")?.takeIf { commentScope && it.isNotBlank() }?.let { return it }
+                    node.optJSONObject("continuationCommand")?.optString("token")
+                        ?.takeIf { commentScope && it.isNotBlank() }?.let { return it }
+                    node.optJSONObject("nextContinuationData")?.optString("continuation")
+                        ?.takeIf { commentScope && it.isNotBlank() }?.let { return it }
+                    node.optJSONObject("reloadContinuationData")?.optString("continuation")
+                        ?.takeIf { commentScope && it.isNotBlank() }?.let { return it }
+                    val keys = node.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val childScope = commentScope || key.contains("comment", true) ||
+                            key == "continuationItemRenderer"
+                        scan(node.opt(key), childScope)?.let { return it }
+                    }
+                }
+            }
+            return null
+        }
+        return scan(root, false)
+    }
+
     private fun collectComments(node: Any?, out: MutableMap<String, CommentItem>) {
         when (node) {
             is JSONArray -> for (i in 0 until node.length()) collectComments(node.opt(i), out)
             is JSONObject -> {
-                val cr = node.optJSONObject("commentRenderer")
-                if (cr != null) {
-                    val id = cr.optString("commentId")
-                    val author = txt(cr.opt("authorText")).ifBlank { txt(cr.opt("authorName")) }
-                    val body = txt(cr.opt("contentText")).ifBlank { txt(cr.opt("content")) }
-                    val likes = txt(cr.opt("voteCount"))
-                    val avatar = imageUrl(cr.opt("authorThumbnail"))
-                    if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
+                val legacy = node.optJSONObject("commentRenderer")
+                if (legacy != null) {
+                    val id = legacy.optString("commentId")
+                    val author = txt(legacy.opt("authorText")).ifBlank { txt(legacy.opt("authorName")) }
+                    val body = txt(legacy.opt("contentText")).ifBlank { txt(legacy.opt("content")) }
+                    val likes = txt(legacy.opt("voteCount"))
+                    val avatar = imageUrl(legacy.opt("authorThumbnail"))
+                    if (id.isNotBlank() && body.isNotBlank()) {
+                        out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
+                    }
                 }
-                // YouTube yeni WEB istemcisinde commentRenderer yerine commentViewModel kullanabiliyor.
+
                 val modern = node.optJSONObject("commentViewModel") ?: node.optJSONObject("commentEntityPayload")
                 if (modern != null) {
                     val props = modern.optJSONObject("properties") ?: modern
                     val authorNode = props.opt("authorText") ?: props.opt("authorName") ?: props.opt("author")
-                    val bodyNode = props.opt("contentText") ?: props.opt("content") ?: props.opt("commentText")
+                    val authorObject = authorNode as? JSONObject
+                    val author = txt(authorNode).ifBlank {
+                        txt(authorObject?.opt("displayName")).ifBlank { txt(authorObject?.opt("name")) }
+                    }
+                    val body = txt(props.opt("contentText"))
+                        .ifBlank { txt(props.opt("commentText")) }
+                        .ifBlank { txt(props.opt("content")) }
+                        .ifBlank { txt(props.opt("contentRuns")) }
                     val toolbar = props.optJSONObject("toolbar")
-                    val id = modern.optString("commentId").ifBlank {
-                        modern.optString("commentKey").ifBlank { node.optString("entityKey") }
+                    val id = modern.optString("commentId")
+                        .ifBlank { modern.optString("commentKey") }
+                        .ifBlank { modern.optString("key") }
+                        .ifBlank { node.optString("entityKey") }
+                    val likes = txt(props.opt("voteCount"))
+                        .ifBlank { txt(props.opt("likeCount")) }
+                        .ifBlank { txt(toolbar?.opt("likeCountA11y")) }
+                    val avatar = imageUrl(props.opt("avatar"))
+                        .ifBlank { imageUrl(props.opt("authorThumbnail")) }
+                        .ifBlank { imageUrl(authorObject?.opt("avatar")) }
+                    if (id.isNotBlank() && body.isNotBlank()) {
+                        out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
                     }
-                    val author = txt(authorNode).ifBlank { txt(props.opt("authorName")) }
-                    val body = txt(bodyNode)
-                    val likes = txt(props.opt("voteCount")).ifBlank {
-                        txt(props.opt("likeCount")).ifBlank { txt(toolbar?.opt("likeCountA11y")) }
-                    }
-                    val avatar = imageUrl(props.opt("avatar")).ifBlank {
-                        imageUrl(props.opt("authorThumbnail")).ifBlank { imageUrl((authorNode as? JSONObject)?.opt("avatar")) }
-                    }
-                    if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
                 }
+
                 val keys = node.keys()
                 while (keys.hasNext()) collectComments(node.opt(keys.next()), out)
             }
@@ -232,10 +299,25 @@ object InnerTube {
 
     private fun txt(o: Any?): String = when (o) {
         is String -> o
-        is JSONObject -> o.optString("simpleText").ifBlank {
-            o.optJSONArray("runs")?.let { a -> (0 until a.length()).joinToString("") { a.optJSONObject(it)?.optString("text").orEmpty() } }
-                ?: o.optString("content")
+        is JSONObject -> {
+            val simple = o.optString("simpleText")
+            if (simple.isNotBlank()) simple
+            else {
+                val runs = o.optJSONArray("runs") ?: o.optJSONArray("contentRuns")
+                val fromRuns = runs?.let { a ->
+                    (0 until a.length()).joinToString("") { index ->
+                        val item = a.optJSONObject(index)
+                        txt(item?.opt("text") ?: item?.opt("content"))
+                    }
+                }.orEmpty()
+                if (fromRuns.isNotBlank()) fromRuns
+                else {
+                    val content = o.opt("content") ?: o.opt("text") ?: o.opt("contentText") ?: o.opt("displayText")
+                    if (content != null && content !== o) txt(content) else ""
+                }
+            }
         }
+        is JSONArray -> (0 until o.length()).joinToString("") { txt(o.opt(it)) }
         else -> ""
     }
 }
