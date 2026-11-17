@@ -51,23 +51,48 @@ object Repo {
         StreamInfo.getInfo("https://www.youtube.com/watch?v=$id")
     }
 
-    /** NewPipe'in YouTube yorum ayrıştırıcısı modern yorum entity'lerini ve continuation sayfalarını yönetir. */
+    /** YouTube yorumlarini NewPipe'in yorum extractor'i ve continuation sayfalariyla yukle. */
     suspend fun comments(videoId: String): List<CommentItem> = withContext(Dispatchers.IO) {
         val url = "https://www.youtube.com/watch?v=$videoId"
-        val info = CommentsInfo.getInfo(yt, url) ?: return@withContext emptyList()
-        if (info.isCommentsDisabled()) return@withContext emptyList()
-        info.getRelatedItems().mapNotNull { item ->
-            val id = item.getCommentId()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val text = item.getCommentText().content().trim()
-            if (text.isBlank()) return@mapNotNull null
-            CommentItem(
-                id = id,
-                author = item.getUploaderName().orEmpty(),
-                text = text,
-                likes = item.getTextualLikeCount().orEmpty(),
-                avatar = item.getUploaderAvatars().firstOrNull()?.getUrl().orEmpty(),
-            )
-        }.distinctBy { it.id }.take(50)
+        val info = CommentsInfo.getInfo(yt, url)
+        if (info.isCommentsDisabled()) {
+            throw IllegalStateException("Bu videoda yorumlar kapatılmış.")
+        }
+
+        val found = LinkedHashMap<String, CommentItem>()
+        fun append(items: List<org.schabi.newpipe.extractor.comments.CommentsInfoItem>) {
+            items.forEach { item ->
+                val id = item.getCommentId().orEmpty()
+                val body = item.getCommentText().content().trim()
+                if (id.isNotBlank() && body.isNotBlank()) {
+                    found.putIfAbsent(
+                        id,
+                        CommentItem(
+                            id = id,
+                            author = item.getUploaderName().orEmpty(),
+                            text = body,
+                            likes = item.getTextualLikeCount().orEmpty(),
+                            avatar = item.getUploaderAvatars().firstOrNull()?.getUrl().orEmpty(),
+                        ),
+                    )
+                }
+            }
+        }
+
+        append(info.getRelatedItems())
+        var nextPage = info.getNextPage()
+        var pageCount = 0
+        while (nextPage != null && found.size < 100 && pageCount < 4) {
+            val page = CommentsInfo.getMoreItems(info, nextPage)
+            append(page.getItems())
+            nextPage = page.getNextPage()
+            pageCount++
+        }
+
+        if (found.isEmpty()) {
+            throw IllegalStateException("YouTube yorum yanıtı boş döndü. Video yorumları gizli olabilir veya YouTube isteği engellemiş olabilir.")
+        }
+        found.values.toList()
     }
 
     fun related(info: StreamInfo): List<Video> =
