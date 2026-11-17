@@ -107,6 +107,34 @@ fun rememberServicePlayer(onFail: (String) -> Unit): ExoPlayer? {
     return player
 }
 
+
+/** Shorts akisi icin servis omurlu, ana oynaticidan bagimsiz ExoPlayer. */
+@Composable
+fun rememberShortsPlayer(): ExoPlayer? {
+    val ctx = LocalContext.current
+    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+    DisposableEffect(Unit) {
+        var future: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
+        try {
+            val token = SessionToken(ctx, ComponentName(ctx, PlaybackService::class.java))
+            future = MediaController.Builder(ctx, token).buildAsync()
+        } catch (t: Throwable) {
+            Log.w("VYRO", "Shorts medya servisi baglanamadi", t)
+        }
+        onDispose { future?.let { runCatching { MediaController.releaseFuture(it) } } }
+    }
+    LaunchedEffect(Unit) {
+        repeat(100) {
+            PlaybackService.sharedShortsPlayer?.let {
+                player = it
+                return@LaunchedEffect
+            }
+            delay(50)
+        }
+    }
+    return player
+}
+
 /** YouTube tarzı kontroller: oynat/duraklat, 5 saniyelik ileri/geri ve ardışık çift dokunuşta 5/10/15 saniyelik arama. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
