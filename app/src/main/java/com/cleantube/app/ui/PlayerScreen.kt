@@ -41,6 +41,7 @@ import com.cleantube.app.data.Video
 import com.cleantube.app.data.fmtViews
 import com.cleantube.app.player.PlaybackService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import org.schabi.newpipe.extractor.stream.StreamInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -270,7 +271,16 @@ fun PlayerScreen(vm: MainVM, video: Video) {
 @Composable
 fun MiniPlayer(vm: MainVM) {
     val video = vm.playing ?: return
-    val player = PlaybackService.sharedPlayer
+    var player by remember { mutableStateOf(PlaybackService.sharedPlayer) }
+    LaunchedEffect(Unit) {
+        repeat(100) {
+            PlaybackService.sharedPlayer?.let {
+                player = it
+                return@LaunchedEffect
+            }
+            delay(50)
+        }
+    }
     var isPlaying by remember(player) { mutableStateOf(player?.isPlaying == true) }
     DisposableEffect(player) {
         val p = player
