@@ -294,6 +294,7 @@ fun LibraryScreen(vm: MainVM) {
                                 leadingContent = { Icon(Icons.Filled.PlayArrow, null) },
                                 headlineContent = { Text(p.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                                 supportingContent = { Text("Oynatma listesini aç") },
+                                trailingContent = { TextButton(onClick = { vm.playPlaylist(p) }) { Text("Oynat") } },
                                 modifier = Modifier.clickable { vm.openSection(Section(p.title, if (p.id.startsWith("VL")) p.id else "VL" + p.id)) },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             )
