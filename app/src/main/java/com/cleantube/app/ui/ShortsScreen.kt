@@ -180,6 +180,7 @@ fun ShortsScreen(vm: MainVM) {
                                 useController = false
                                 keepScreenOn = true
                                 setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                setKeepContentOnPlayerReset(true)
                             }
                         },
                         update = { it.player = exo },
