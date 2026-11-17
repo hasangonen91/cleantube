@@ -169,7 +169,7 @@ fun HomeScreen(vm: MainVM) {
                     item { ShortsShelf(vm) }
                 }
                 items(if (vm.categoryIndex == 0) vm.home else vm.results, key = { it.id }) {
-                    VideoCard(it) { vm.playing = it }
+                    VideoCard(it) { vm.play(it, if (vm.categoryIndex == 0) vm.home else vm.results) }
                 }
             }
         }
@@ -227,7 +227,7 @@ fun SearchScreen(vm: MainVM) {
         } else when {
             vm.searching -> Loading()
             vm.searchError != null -> ErrorView(vm.searchError!!) { vm.search() }
-            else -> VideoList(vm.results, { vm.playing = it })
+            else -> VideoList(vm.results, { vm.play(it, vm.results) })
         }
     }
 }
@@ -246,7 +246,7 @@ private val sections = listOf(
 fun LibraryScreen(vm: MainVM) {
     Column(Modifier.fillMaxSize()) {
         Text("Kitaplık", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp))
-        if (!vm.loggedIn) {
+        if (!vm.loggedIn && vm.section?.browseId != "FEmusic") {
             Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
                 BrandMark(56.dp)
                 Spacer(Modifier.height(16.dp))
@@ -282,14 +282,14 @@ fun LibraryScreen(vm: MainVM) {
             when {
                 vm.libLoading -> Loading()
                 vm.libError != null -> ErrorView(vm.libError!!) { vm.openSection(s) }
-                s.isPlaylists -> LazyColumn(Modifier.fillMaxSize()) {
+                s.isPlaylists || s.browseId == "FEmusic" -> LazyColumn(Modifier.fillMaxSize()) {
                     items(vm.libPlaylists, key = { it.id }) { p ->
-                        ListItem(headlineContent = { Text(p.title) }, modifier = Modifier.clickable { vm.openSection(Section(p.title, "VL" + p.id)) },
+                        ListItem(headlineContent = { Text(p.title) }, modifier = Modifier.clickable { vm.openSection(Section(p.title, if (p.id.startsWith("VL")) p.id else "VL" + p.id)) },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent))
                     }
                 }
                 vm.libVideos.isEmpty() -> ErrorView("Burada gösterilecek bir şey bulunamadı.", null)
-                else -> VideoList(vm.libVideos, { vm.playing = it })
+                else -> VideoList(vm.libVideos, { vm.play(it, vm.libVideos) })
             }
         }
     }
@@ -298,21 +298,29 @@ fun LibraryScreen(vm: MainVM) {
 @Composable
 fun AppRoot(vm: MainVM) {
     if (vm.showLogin) { LoginScreen(onDone = { vm.onLoggedIn() }, onCancel = { vm.showLogin = false }); return }
-    val playing = vm.playing
+    val hasMini = vm.playing != null && !vm.playerExpanded
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                NavigationBarItem(vm.tab == 0, { if (vm.tab == 0) vm.refreshHome() else vm.tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
-                NavigationBarItem(vm.tab == 1, { vm.tab = 1; vm.loadShorts() }, { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("Shorts") })
-                NavigationBarItem(vm.tab == 2, { vm.tab = 2 }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
-                NavigationBarItem(vm.tab == 3, { vm.tab = 3 }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
+            Column {
+                if (hasMini) MiniPlayer(vm)
+                NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
+                    NavigationBarItem(vm.tab == 0, {
+                        if (vm.tab == 0) vm.refreshHome() else vm.tab = 0
+                        vm.minimizePlayer()
+                    }, { Icon(Icons.Filled.Home, null) }, label = { Text("Ana Sayfa") })
+                    NavigationBarItem(vm.tab == 1, {
+                        vm.tab = 1; vm.loadShorts(); vm.minimizePlayer()
+                    }, { Icon(Icons.Filled.PlayArrow, null) }, label = { Text("Shorts") })
+                    NavigationBarItem(vm.tab == 2, { vm.tab = 2; vm.minimizePlayer() }, { Icon(Icons.Filled.Search, null) }, label = { Text("Ara") })
+                    NavigationBarItem(vm.tab == 3, { vm.tab = 3; vm.minimizePlayer() }, { Icon(Icons.Filled.Person, null) }, label = { Text("Kitaplık") })
+                }
             }
         },
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (vm.tab) { 0 -> HomeScreen(vm); 1 -> ShortsScreen(vm); 2 -> SearchScreen(vm); else -> LibraryScreen(vm) }
-            if (playing != null) PlayerScreen(vm, playing)
         }
     }
+    if (vm.playing != null && vm.playerExpanded) PlayerScreen(vm, vm.playing!!)
 }
