@@ -336,6 +336,7 @@ fun AppRoot(vm: MainVM) {
     var showExitDialog by remember { mutableStateOf(false) }
     BackHandler(enabled = true) {
         when {
+            vm.playing != null && vm.playerExpanded -> vm.minimizePlayer()
             vm.tab != 0 -> vm.tab = 0
             vm.playing != null && !vm.playerExpanded -> {
                 PlaybackService.sharedPlayer?.let { p ->
