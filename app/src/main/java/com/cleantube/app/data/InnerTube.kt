@@ -118,13 +118,23 @@ object InnerTube {
                     if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
                 }
                 // YouTube yeni WEB istemcisinde commentRenderer yerine commentViewModel kullanabiliyor.
-                val modern = node.optJSONObject("commentViewModel")
+                val modern = node.optJSONObject("commentViewModel") ?: node.optJSONObject("commentEntityPayload")
                 if (modern != null) {
-                    val id = modern.optString("commentId").ifBlank { modern.optString("commentKey") }
-                    val author = txt(modern.opt("authorText")).ifBlank { txt(modern.opt("authorName")) }
-                    val body = txt(modern.opt("contentText")).ifBlank { txt(modern.opt("content")).ifBlank { txt(modern.opt("commentText")) } }
-                    val likes = txt(modern.opt("voteCount")).ifBlank { txt(modern.opt("likeCount")) }
-                    val avatar = imageUrl(modern.opt("avatar")).ifBlank { imageUrl(modern.opt("authorThumbnail")) }
+                    val props = modern.optJSONObject("properties") ?: modern
+                    val authorNode = props.opt("authorText") ?: props.opt("authorName") ?: props.opt("author")
+                    val bodyNode = props.opt("contentText") ?: props.opt("content") ?: props.opt("commentText")
+                    val toolbar = props.optJSONObject("toolbar")
+                    val id = modern.optString("commentId").ifBlank {
+                        modern.optString("commentKey").ifBlank { node.optString("entityKey") }
+                    }
+                    val author = txt(authorNode).ifBlank { txt(props.opt("authorName")) }
+                    val body = txt(bodyNode)
+                    val likes = txt(props.opt("voteCount")).ifBlank {
+                        txt(props.opt("likeCount")).ifBlank { txt(toolbar?.opt("likeCountA11y")) }
+                    }
+                    val avatar = imageUrl(props.opt("avatar")).ifBlank {
+                        imageUrl(props.opt("authorThumbnail")).ifBlank { imageUrl((authorNode as? JSONObject)?.opt("avatar")) }
+                    }
                     if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
                 }
                 val keys = node.keys()
