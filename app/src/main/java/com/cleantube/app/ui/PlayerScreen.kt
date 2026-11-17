@@ -159,6 +159,8 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                     keepScreenOn = true
                 }
             },
+            update = { it.player = activePlayer },
+            onRelease = { it.player = null },
         )
     }
     val overlay: @Composable (Modifier) -> Unit = { m ->
@@ -211,7 +213,8 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                         }
                     }
                     if (i != null) {
-                        items(Repo.related(i), key = { it.id }) { r -> VideoCard(r) { vm.playing = r } }
+                        val related = Repo.related(i)
+                        items(related, key = { it.id }) { r -> VideoCard(r) { vm.play(r, related) } }
                     }
                 }
             }
