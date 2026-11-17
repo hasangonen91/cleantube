@@ -149,8 +149,7 @@ object InnerTube {
                     val keys = node.keys()
                     while (keys.hasNext()) {
                         val key = keys.next()
-                        val childScope = commentScope || key.contains("comment", true) ||
-                            key == "continuationItemRenderer"
+                        val childScope = commentScope || key.contains("comment", true)
                         scan(node.opt(key), childScope)?.let { return it }
                     }
                 }
