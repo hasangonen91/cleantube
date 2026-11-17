@@ -90,17 +90,21 @@ fun ShortsScreen(vm: MainVM) {
     }
 
     // Servis oynaticisini dinle (hata -> siradaki kaynak; ilk kare -> kucuk resmi gizle).
-    DisposableEffect(player) {
+    DisposableEffect(player, active) {
         val p = player
-        val l = object : Player.Listener {
-            override fun onPlayerError(e: PlaybackException) {
-                Log.w("VYRO", "Shorts oynatma hatasi: ${e.errorCodeName}", e)
-                if (p != null && !chain.tryNext(p)) error = "Bu Shorts oynatılamadı. Kaydırarak devam et."
+        if (p == null || !active) {
+            onDispose { }
+        } else {
+            val l = object : Player.Listener {
+                override fun onPlayerError(e: PlaybackException) {
+                    Log.w("VYRO", "Shorts oynatma hatasi: ${e.errorCodeName}", e)
+                    if (!chain.tryNext(p)) error = "Bu Shorts oynatılamadı. Kaydırarak devam et."
+                }
+                override fun onRenderedFirstFrame() { ready = true }
             }
-            override fun onRenderedFirstFrame() { ready = true }
+            p.addListener(l)
+            onDispose { p.removeListener(l) }
         }
-        p?.addListener(l)
-        onDispose { p?.removeListener(l) }
     }
     // Sekmeden ayrilinca (ve baska video acik degilse) oynatmayi durdur.
     DisposableEffect(player) {
