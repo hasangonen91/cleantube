@@ -150,7 +150,13 @@ fun ShortsScreen(vm: MainVM) {
                 .setConnectTimeoutMs(20_000)
                 .setReadTimeoutMs(30_000)
             val maxHeight = Prefs.heightFor(quality)
-            availableQualities = Repo.qualities(info).ifEmpty { listOf(Prefs.AUTO_HEIGHT) }
+            val actualQualities = Repo.qualities(info)
+            availableQualities = actualQualities.ifEmpty { listOf(Prefs.AUTO_HEIGHT) }
+            if (quality > 0 && actualQualities.isNotEmpty() && quality !in actualQualities) {
+                quality = 0
+                Prefs.quality = 0
+                return@LaunchedEffect
+            }
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                 .setMinVideoSize(0, if (quality == 0) 0 else maxHeight)
                 .setMaxVideoSize(Int.MAX_VALUE, maxHeight)
