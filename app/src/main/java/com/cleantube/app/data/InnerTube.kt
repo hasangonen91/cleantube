@@ -90,18 +90,20 @@ object InnerTube {
     suspend fun comments(videoId: String): List<CommentItem> = withContext(Dispatchers.IO) {
         val ver = clientVersion()
         val ctx = JSONObject().put("client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR"))
-        val body = JSONObject().put("context", ctx).put("videoId", videoId).toString().toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url("$O/youtubei/v1/next?prettyPrint=false").post(body)
+        val body = JSONObject().put("context", ctx).put("videoId", videoId).put("racyCheckOk", true).put("contentCheckOk", true)
+            .toString().toRequestBody("application/json".toMediaType())
+        val builder = Request.Builder().url("$O/youtubei/v1/next?prettyPrint=false").post(body)
             .header("User-Agent", UA).header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", ver)
-            .header("Origin", O).header("Referer", "$O/watch?v=$videoId").build()
-        client.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) error("Yorumlar alınamadı (${r.code})")
+            .header("Origin", O).header("Referer", "$O/watch?v=$videoId")
+        val cookie = Auth.cookies
+        if (!cookie.isNullOrBlank()) builder.header("Cookie", cookie).header("Authorization", Auth.authHeader()).header("X-Goog-AuthUser", "0")
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) error("YouTube yorum isteği başarısız (" + response.code + ")")
             val out = LinkedHashMap<String, CommentItem>()
-            collectComments(JSONObject(r.body?.string().orEmpty()), out)
+            collectComments(JSONObject(response.body?.string().orEmpty()), out)
             out.values.toList()
         }
     }
-
     private fun collectComments(node: Any?, out: MutableMap<String, CommentItem>) {
         when (node) {
             is JSONArray -> for (i in 0 until node.length()) collectComments(node.opt(i), out)
@@ -109,10 +111,20 @@ object InnerTube {
                 val cr = node.optJSONObject("commentRenderer")
                 if (cr != null) {
                     val id = cr.optString("commentId")
-                    val author = cr.optJSONObject("authorText")?.let(::txt).orEmpty()
-                    val body = cr.optJSONObject("contentText")?.let(::txt).orEmpty()
-                    val likes = cr.optJSONObject("voteCount")?.let(::txt).orEmpty()
-                    val avatar = cr.optJSONObject("authorThumbnail")?.optJSONArray("thumbnails")?.optJSONObject(0)?.optString("url").orEmpty()
+                    val author = txt(cr.opt("authorText")).ifBlank { txt(cr.opt("authorName")) }
+                    val body = txt(cr.opt("contentText")).ifBlank { txt(cr.opt("content")) }
+                    val likes = txt(cr.opt("voteCount"))
+                    val avatar = imageUrl(cr.opt("authorThumbnail"))
+                    if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
+                }
+                // YouTube yeni WEB istemcisinde commentRenderer yerine commentViewModel kullanabiliyor.
+                val modern = node.optJSONObject("commentViewModel")
+                if (modern != null) {
+                    val id = modern.optString("commentId").ifBlank { modern.optString("commentKey") }
+                    val author = txt(modern.opt("authorText")).ifBlank { txt(modern.opt("authorName")) }
+                    val body = txt(modern.opt("contentText")).ifBlank { txt(modern.opt("content")).ifBlank { txt(modern.opt("commentText")) } }
+                    val likes = txt(modern.opt("voteCount")).ifBlank { txt(modern.opt("likeCount")) }
+                    val avatar = imageUrl(modern.opt("avatar")).ifBlank { imageUrl(modern.opt("authorThumbnail")) }
                     if (id.isNotBlank() && body.isNotBlank()) out.putIfAbsent(id, CommentItem(id, author, body, likes, avatar))
                 }
                 val keys = node.keys()
@@ -121,6 +133,14 @@ object InnerTube {
         }
     }
 
+    private fun imageUrl(node: Any?): String {
+        if (node !is JSONObject) return ""
+        node.optJSONArray("thumbnails")?.optJSONObject(0)?.optString("url")?.takeIf { !it.isNullOrBlank() }?.let { return it }
+        val image = node.optJSONObject("image")
+        image?.optJSONArray("sources")?.optJSONObject(0)?.optString("url")?.takeIf { !it.isNullOrBlank() }?.let { return it }
+        node.optJSONArray("sources")?.optJSONObject(0)?.optString("url")?.takeIf { !it.isNullOrBlank() }?.let { return it }
+        return node.optString("url")
+    }
     private val SKIP = setOf("adSlotRenderer", "adPlacementRenderer", "promotedSparklesWebRenderer", "displayAdRenderer")
 
     private fun collect(node: Any?, vids: MutableMap<String, Video>, pls: MutableMap<String, PlaylistItem>?) {
