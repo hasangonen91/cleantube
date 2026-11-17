@@ -164,12 +164,30 @@ fun HomeScreen(vm: MainVM) {
         when {
             vm.homeLoading && vm.home.isEmpty() -> Loading()
             vm.homeError != null && vm.home.isEmpty() -> ErrorView(vm.homeError!!) { vm.loadHome() }
-            else -> LazyColumn(Modifier.fillMaxSize().nestedScroll(pullConnection), state = listState) {
-                if (vm.categoryIndex == 0 && vm.shorts.isNotEmpty()) {
-                    item { ShortsShelf(vm) }
+            else -> Box(Modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxSize().nestedScroll(pullConnection), state = listState) {
+                    if (vm.categoryIndex == 0 && vm.shorts.isNotEmpty()) {
+                        item { ShortsShelf(vm) }
+                    }
+                    items(if (vm.categoryIndex == 0) vm.home else vm.results, key = { it.id }) {
+                        VideoCard(it) { vm.play(it, if (vm.categoryIndex == 0) vm.home else vm.results) }
+                    }
                 }
-                items(if (vm.categoryIndex == 0) vm.home else vm.results, key = { it.id }) {
-                    VideoCard(it) { vm.play(it, if (vm.categoryIndex == 0) vm.home else vm.results) }
+                if (pull.floatValue > 0f || vm.homeLoading) {
+                    Surface(
+                        Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                        shape = CircleShape,
+                        tonalElevation = 5.dp,
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        ) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text(if (vm.homeLoading) "Yenileniyor…" else "Yenilemek için çek", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
         }
@@ -311,6 +329,9 @@ fun LibraryScreen(vm: MainVM) {
 @Composable
 fun AppRoot(vm: MainVM) {
     if (vm.showLogin) { LoginScreen(onDone = { vm.onLoggedIn() }, onCancel = { vm.showLogin = false }); return }
+    BackHandler(enabled = vm.tab != 0 || (vm.playing != null && !vm.playerExpanded)) {
+        if (vm.tab != 0) vm.tab = 0 else vm.closePlayer()
+    }
     val hasMini = vm.playing != null && !vm.playerExpanded
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
