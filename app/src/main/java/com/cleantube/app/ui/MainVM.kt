@@ -56,6 +56,7 @@ class MainVM : ViewModel() {
     }
 
     private var homeJob: Job? = null
+    private var homeRequestId = 0
 
     fun refreshHome() {
         homeScrollRequest++
@@ -63,11 +64,12 @@ class MainVM : ViewModel() {
     }
 
     fun loadHome() {
+        val requestId = ++homeRequestId
         homeJob?.cancel()
+        categoryIndex = 0
+        homeLoading = true
+        homeError = null
         homeJob = viewModelScope.launch(safe) {
-            categoryIndex = 0
-            homeLoading = true
-            homeError = null
             try {
                 val fresh = if (Auth.loggedIn) {
                     runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Repo.trending()
@@ -78,7 +80,7 @@ class MainVM : ViewModel() {
             } catch (e: Throwable) {
                 homeError = friendly(e, "Yüklenemedi")
             } finally {
-                homeLoading = false
+                if (requestId == homeRequestId) homeLoading = false
             }
         }
     }
