@@ -66,15 +66,11 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         Box(Modifier.fillMaxSize(), Alignment.Center) {
             if (error == null) CircularProgressIndicator() else Text(error!!, Modifier.padding(16.dp))
         }
-        BackHandler { vm.playing = null }
+        BackHandler { vm.closePlayer() }
         return
     }
     // Ekran kapanip uygulama arka plana gecince servis oynatmaya devam eder.
     // Oynatma yalnizca kullanici oynaticiyi kapattiginda durdurulur.
-    val closePlayer = {
-        runCatching { activePlayer.pause(); activePlayer.stop(); activePlayer.clearMediaItems() }
-        vm.playing = null
-    }
     DisposableEffect(activePlayer) {
         val listener = object : Player.Listener {
             override fun onPlayerError(playbackError: PlaybackException) {
