@@ -58,10 +58,25 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
-    /** Uygulama son uygulamalardan kapatilirsa ve calmiyorsa servis de kapansin. */
+    /**
+     * Gorev son uygulamalardan kaldirildiginda uygulama kapanmis sayilir:
+     * normal video ve Shorts akisini durdurup servisi kapat. Ekran kilidi
+     * onTaskRemoved tetiklemez; bu nedenle kilit ekrani oynatimi devam eder.
+     */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val p = mediaSession?.player
-        if (p == null || !p.playWhenReady || p.mediaItemCount == 0) stopSelf()
+        runCatching {
+            mediaSession?.player?.apply {
+                playWhenReady = false
+                stop()
+                clearMediaItems()
+            }
+            shortsExoPlayer?.apply {
+                playWhenReady = false
+                stop()
+                clearMediaItems()
+            }
+        }
+        stopSelf()
     }
 
     override fun onDestroy() {
