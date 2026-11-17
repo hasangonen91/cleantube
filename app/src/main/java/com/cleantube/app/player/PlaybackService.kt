@@ -20,6 +20,7 @@ import androidx.media3.session.MediaSessionService
  */
 class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
+    private var shortsExoPlayer: ExoPlayer? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -38,6 +39,16 @@ class PlaybackService : MediaSessionService() {
         // Ekran kapaliyken ses oynatimi sirasinda CPU uykuya gecmesin.
         exoPlayer.setWakeMode(C.WAKE_MODE_LOCAL)
         sharedPlayer = exoPlayer
+        // Shorts için ayrı oynatıcı: mini oynatıcıdaki normal videonun kaynağını ezmez.
+        shortsExoPlayer = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+                true,
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        sharedShortsPlayer = shortsExoPlayer
         mediaSession = MediaSession.Builder(this, exoPlayer).build()
     }
 
@@ -55,6 +66,9 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         mediaSession = null
+        shortsExoPlayer?.release()
+        shortsExoPlayer = null
+        sharedShortsPlayer = null
         sharedPlayer = null
         super.onDestroy()
     }
@@ -62,6 +76,10 @@ class PlaybackService : MediaSessionService() {
     companion object {
         @Volatile
         var sharedPlayer: ExoPlayer? = null
+            private set
+
+        @Volatile
+        var sharedShortsPlayer: ExoPlayer? = null
             private set
     }
 }
