@@ -107,16 +107,20 @@ fun ShortsScreen(vm: MainVM) {
         }
     }
     // Shorts kendi oynaticisini kullanir; normal video mini oynaticida korunur.
-    DisposableEffect(player, active) {
-        val shorts = player
+    DisposableEffect(active) {
         val main = com.cleantube.app.player.PlaybackService.sharedPlayer
         val resumeMain = active && main?.isPlaying == true
         if (active) main?.pause()
         onDispose {
+            if (resumeMain && vm.playing != null) runCatching { main?.play() }
+        }
+    }
+    DisposableEffect(player) {
+        val shorts = player
+        onDispose {
             if (shorts != null) runCatching {
                 shorts.pause(); shorts.clearMediaItems(); shorts.repeatMode = Player.REPEAT_MODE_OFF; shorts.volume = 1f
             }
-            if (resumeMain && vm.playing != null) runCatching { main?.play() }
         }
     }
     // Sayfa degisince / kalite degisince yeni Shorts'u direkt oynat; sonrakini onceden coz.
