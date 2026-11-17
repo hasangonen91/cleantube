@@ -188,6 +188,21 @@ class MainVM : ViewModel() {
         }
     }
 
+    fun playPlaylist(playlist: PlaylistItem) = viewModelScope.launch(safe) {
+        val browseId = if (playlist.id.startsWith("VL")) playlist.id else "VL" + playlist.id
+        section = Section(playlist.title, browseId)
+        libLoading = true
+        libError = null
+        try {
+            val videos = InnerTube.videos(browseId)
+            libVideos = videos
+            if (videos.isNotEmpty()) play(videos.first(), videos)
+            else libError = "Bu listede oynatılabilir video bulunamadı."
+        } catch (e: CancellationException) { throw e }
+        catch (e: Throwable) { libError = friendly(e, "Liste oynatılamadı") }
+        finally { libLoading = false }
+    }
+
     fun onLoggedIn() { loggedIn = true; showLogin = false; loadHome() }
 
     fun logout() {
