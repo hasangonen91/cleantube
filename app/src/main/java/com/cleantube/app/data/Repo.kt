@@ -79,7 +79,7 @@ object Repo {
 
     /** Secilebilir kaliteler (yukseklik). */
     fun qualities(info: StreamInfo): List<Int> =
-        (info.videoOnlyStreams.progressive().map { it.height } + info.videoStreams.progressive().map { it.height })
+        (info.videoOnlyStreams.map { it.height } + info.videoStreams.map { it.height })
             .filter { it > 0 }.distinct().sortedDescending()
 
     /**
@@ -112,6 +112,8 @@ object Repo {
         val hls = info.hlsUrl?.takeIf { it.isNotBlank() }
         val dash = info.dashMpdUrl?.takeIf { it.isNotBlank() }
         val live = info.streamType == StreamType.LIVE_STREAM || info.streamType == StreamType.AUDIO_LIVE_STREAM
+        // DASH once: kalite secimini ExoPlayer'in track-selection parametreleri uygular.
+        if (!live && dash != null) out += { DashMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(dash)) }
         // Canli yayinda once HLS.
         if (live && hls != null) out += { HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls)) }
 
@@ -136,7 +138,6 @@ object Repo {
         if (webmVideo != null && webmAudio != null) opts.add(Opt(webmVideo.height, 2) { MergingMediaSource(source(webmVideo.content), source(webmAudio.content)) })
         // Secilen kaliteye en yakin (en yuksek) once; esitlikte hazir birlesik akis once.
         opts.sortedWith(compareByDescending<Opt> { it.height }.thenBy { it.priority }).forEach { out.add(it.make) }
-        if (dash != null) out += { DashMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(dash)) }
         if (!live && hls != null) out += { HlsMediaSource.Factory(f).createMediaSource(MediaItem.fromUri(hls)) }
         return out
     }
