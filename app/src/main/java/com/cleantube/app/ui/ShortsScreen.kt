@@ -65,8 +65,8 @@ fun ShortsScreen(vm: MainVM) {
     )
     val page = pager.currentPage
     val activeVideo = vm.shorts.getOrNull(page)
-    val player = rememberServicePlayer { }
-    val active = vm.tab == 1 && vm.playing == null && !vm.showLogin
+    val player = rememberShortsPlayer()
+    val active = vm.tab == 1 && !vm.showLogin
     var quality by remember { mutableIntStateOf(Prefs.quality) }
     var showQ by remember { mutableStateOf(false) }
     var muted by remember { mutableStateOf(false) }
@@ -106,13 +106,17 @@ fun ShortsScreen(vm: MainVM) {
             onDispose { p.removeListener(l) }
         }
     }
-    // Sekmeden ayrilinca (ve baska video acik degilse) oynatmayi durdur.
-    DisposableEffect(player) {
-        val p = player
+    // Shorts kendi oynaticisini kullanir; normal video mini oynaticida korunur.
+    DisposableEffect(player, active) {
+        val shorts = player
+        val main = com.cleantube.app.player.PlaybackService.sharedPlayer
+        val resumeMain = active && main?.isPlaying == true
+        if (active) main?.pause()
         onDispose {
-            if (p != null && vm.playing == null) runCatching {
-                p.pause(); p.clearMediaItems(); p.repeatMode = Player.REPEAT_MODE_OFF; p.volume = 1f
+            if (shorts != null) runCatching {
+                shorts.pause(); shorts.clearMediaItems(); shorts.repeatMode = Player.REPEAT_MODE_OFF; shorts.volume = 1f
             }
+            if (resumeMain && vm.playing != null) runCatching { main?.play() }
         }
     }
     // Sayfa degisince / kalite degisince yeni Shorts'u direkt oynat; sonrakini onceden coz.
@@ -120,7 +124,7 @@ fun ShortsScreen(vm: MainVM) {
         val p = player ?: return@LaunchedEffect
         if (!active) {
             // Normal video mini oynatıcıdayken Shorts ekranı servis oynatıcısını durdurmamalı.
-            if (vm.playing == null) p.pause()
+            p.pause()
             return@LaunchedEffect
         }
         val video = vm.shorts.getOrNull(page) ?: return@LaunchedEffect
