@@ -52,6 +52,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
     var info by remember(video.id) { mutableStateOf<StreamInfo?>(null) }
     var error by remember(video.id) { mutableStateOf<String?>(null) }
     var qualitySel by remember { mutableIntStateOf(Prefs.quality) }
+    var audioOnly by remember { mutableStateOf(Prefs.audioOnly) }
     val maxH = Prefs.heightFor(qualitySel)
     var full by remember { mutableStateOf(false) }
     var showQ by remember { mutableStateOf(false) }
@@ -122,7 +123,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         catch (e: CancellationException) { throw e }
         catch (e: Throwable) { Log.w("VYRO", "Video cozulemedi", e); error = e.message ?: "Video açılamadı" }
     }
-    LaunchedEffect(info, maxH) {
+    LaunchedEffect(info, maxH, audioOnly) {
         val i = info ?: return@LaunchedEffect
         try {
             val keepPos = if (loadedFor == video.id) activePlayer.currentPosition else 0L
@@ -131,9 +132,9 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(20_000)
                 .setReadTimeoutMs(30_000)
-            val list = Repo.candidates(i, maxH, factory)
+            val list = if (audioOnly) Repo.audioCandidates(i, factory) else Repo.candidates(i, maxH, factory)
             if (list.isEmpty()) {
-                error = "Bu video için uyumlu bir akış bulunamadı."
+                error = if (audioOnly) "Bu video için düşük veri tüketimli ses akışı bulunamadı." else "Bu video için uyumlu bir akış bulunamadı."
                 return@LaunchedEffect
             }
             error = null
@@ -182,7 +183,13 @@ fun PlayerScreen(vm: MainVM, video: Video) {
         } else {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
-                    playerView(Modifier.fillMaxSize())
+                    if (audioOnly) {
+                        Column(Modifier.fillMaxSize().background(Color(0xFF10131D)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text("♫", color = MaterialTheme.colorScheme.primary, fontSize = 76.sp)
+                            Text("Yalnızca ses oynatılıyor", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("Düşük veri modu • en fazla ~96 kbps", color = Color.LightGray, fontSize = 12.sp)
+                        }
+                    } else playerView(Modifier.fillMaxSize())
                     overlay(Modifier.fillMaxSize())
                     if (info == null && error == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
                     error?.let {
@@ -206,8 +213,14 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                                 Spacer(Modifier.width(6.dp))
                                 Text("Yorumları gör")
                             }
-                            TextButton(onClick = { showQ = true }) {
-                                Text("Kalite: " + if (qualitySel == 0) "Otomatik (${Prefs.AUTO_HEIGHT}p)" else "${qualitySel}p")
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { showQ = true }, enabled = !audioOnly) {
+                                    Text(if (audioOnly) "Ses modu aktif" else "Kalite: " + if (qualitySel == 0) "Otomatik (360p)" else qualitySel.toString() + "p")
+                                }
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = { audioOnly = !audioOnly; Prefs.audioOnly = audioOnly }) {
+                                    Text(if (audioOnly) "Video moduna geç" else "♫ Sadece ses")
+                                }
                             }
                         }
                     }
@@ -218,7 +231,7 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 }
             }
         }
-        if (showQ) {
+        if (showQ && !audioOnly) {
             QualitySheet(
                 options = info?.let { Repo.qualities(it) }?.takeIf { it.isNotEmpty() } ?: Prefs.DEFAULT_QUALITIES,
                 selected = qualitySel,
@@ -302,7 +315,9 @@ fun MiniPlayer(vm: MainVM) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(112.dp).height(64.dp).background(Color.Black)) {
-            if (activePlayer != null) {
+            if (Prefs.audioOnly) {
+                Box(Modifier.fillMaxSize().background(Color(0xFF10131D)), Alignment.Center) { Text("♫", color = MaterialTheme.colorScheme.primary, fontSize = 30.sp) }
+            } else if (activePlayer != null) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
