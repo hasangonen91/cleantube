@@ -52,6 +52,7 @@ class PlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
+        shortsExoPlayer?.setWakeMode(C.WAKE_MODE_LOCAL)
         sharedShortsPlayer = shortsExoPlayer
         mediaSession = MediaSession.Builder(this, exoPlayer).build()
     }
