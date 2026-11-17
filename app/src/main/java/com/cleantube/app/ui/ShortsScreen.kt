@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -339,6 +340,6 @@ fun ShortsScreen(vm: MainVM) {
 private fun ShortAction(label: String, icon: @Composable () -> Unit, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) { icon() }
-        Text(label, color = Color.White, fontSize = 11.sp)
+        Text(label, color = Color.White, fontSize = 11.sp, modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 2.dp))
     }
 }
