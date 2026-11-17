@@ -158,6 +158,12 @@ fun PlayerScreen(vm: MainVM, video: Video) {
                 .setConnectTimeoutMs(20_000)
                 .setReadTimeoutMs(30_000)
             if (!audioOnly) {
+                val available = Repo.qualities(i)
+                if (qualitySel > 0 && available.isNotEmpty() && qualitySel !in available) {
+                    qualitySel = 0
+                    Prefs.quality = 0
+                    return@LaunchedEffect
+                }
                 // Secilen cozunurlukteki track'i zorla; sadece ust sinir koymak kaliteyi degistirmeyebilir.
                 val selection = activePlayer.trackSelectionParameters.buildUpon()
                     .setMinVideoSize(0, if (qualitySel == 0) 0 else maxH)
