@@ -166,8 +166,13 @@ object Repo {
         StreamInfo.getInfo("https://www.youtube.com/watch?v=$id")
     }
 
+    private fun <T> relatedItemsOf(obj: Any, cls: Class<T>): List<T> = runCatching {
+        val m = obj.javaClass.methods.firstOrNull { (it.name == "getRelatedItems" || it.name == "getRelatedStreams") && it.parameterCount == 0 }
+        (m?.invoke(obj) as? List<*>)?.filterIsInstance(cls).orEmpty()
+    }.getOrDefault(emptyList())
+
     fun related(info: StreamInfo): List<Video> =
-        runCatching { info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }.distinctBy { it.id } }.getOrDefault(emptyList())
+        relatedItemsOf(info, StreamInfoItem::class.java).mapNotNull { it.toVideo() }.distinctBy { it.id }
 
     private fun channelUrl(channelIdOrUrl: String): String = when {
         channelIdOrUrl.startsWith("http") -> channelIdOrUrl
@@ -178,13 +183,13 @@ object Repo {
 
     suspend fun channelPage(channelIdOrUrl: String): ChannelPage = withContext(Dispatchers.IO) {
         val info = ChannelInfo.getInfo(yt, channelUrl(channelIdOrUrl))
-        val videos = runCatching { info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }.distinctBy { it.id } }.getOrDefault(emptyList())
+        val videos = relatedItemsOf(info, StreamInfoItem::class.java).mapNotNull { it.toVideo() }.distinctBy { it.id }
         ChannelPage(info, videos, null)
     }
 
     suspend fun channel(channelIdOrUrl: String): ChannelInfo = channelPage(channelIdOrUrl).info
     fun channelVideos(info: ChannelInfo): List<Video> =
-        runCatching { info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }.distinctBy { it.id } }.getOrDefault(emptyList())
+        relatedItemsOf(info, StreamInfoItem::class.java).mapNotNull { it.toVideo() }.distinctBy { it.id }
 
     suspend fun channelMore(info: ChannelInfo, page: Page): ChannelPage = withContext(Dispatchers.IO) { ChannelPage(info, emptyList(), null) }
 
@@ -203,7 +208,7 @@ object Repo {
     suspend fun commentsPage(videoId: String): CommentsPage = withContext(Dispatchers.IO) {
         runCatching {
             val info = CommentsInfo.getInfo("https://www.youtube.com/watch?v=$videoId")
-            val list = info.relatedItems.mapIndexed { i, c -> c.toComment(i) }.filter { it.text.isNotBlank() }
+            val list = relatedItemsOf(info, CommentsInfoItem::class.java).mapIndexed { i, c -> c.toComment(i) }.filter { it.text.isNotBlank() }
             CommentsPage(list, null, info)
         }.getOrDefault(CommentsPage(emptyList(), null, null))
     }
@@ -231,7 +236,10 @@ object Repo {
                 url.contains(".ttml", true) || url.contains(".xml", true) -> MimeTypes.APPLICATION_TTML
                 else -> MimeTypes.TEXT_VTT
             }
-            val isDefault = runCatching { info.subtitlesDefault == s }.getOrDefault(false)
+            val isDefault = runCatching {
+                val d = info.javaClass.methods.firstOrNull { it.name == "getSubtitlesDefault" && it.parameterCount == 0 }?.invoke(info)
+                d != null && d == s
+            }.getOrDefault(false)
             SubtitleConfiguration.Builder(Uri.parse(url))
                 .setMimeType(mime)
                 .setLanguage(lang)
