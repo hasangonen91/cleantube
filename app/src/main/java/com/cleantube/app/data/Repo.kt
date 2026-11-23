@@ -22,6 +22,7 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.channel.ChannelInfoItem
 import org.schabi.newpipe.extractor.comments.CommentsInfo
 import org.schabi.newpipe.extractor.comments.CommentsInfoItem
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
@@ -214,6 +215,24 @@ object Repo {
     }
 
     suspend fun commentsMore(info: CommentsInfo, page: Page): CommentsPage = withContext(Dispatchers.IO) { CommentsPage(emptyList(), null, info) }
+
+    data class PlaylistPage(val title: String, val videos: List<Video>, val nextPage: Page? = null)
+
+    suspend fun playlistPage(idOrUrl: String): PlaylistPage = withContext(Dispatchers.IO) {
+        val url = when {
+            idOrUrl.startsWith("http") -> idOrUrl
+            idOrUrl.startsWith("RD") || idOrUrl.startsWith("PL") || idOrUrl.startsWith("UU") || idOrUrl.startsWith("OL") || idOrUrl.startsWith("VL") ->
+                "https://www.youtube.com/playlist?list=${idOrUrl.removePrefix("VL")}"
+            else -> "https://www.youtube.com/playlist?list=$idOrUrl"
+        }
+        runCatching {
+            val info = PlaylistInfo.getInfo(yt, url)
+            val videos = runCatching {
+                info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }.distinctBy { it.id }
+            }.getOrElse { relatedItemsOf(info, StreamInfoItem::class.java).mapNotNull { it.toVideo() }.distinctBy { it.id } }
+            PlaylistPage(runCatching { info.name.orEmpty() }.getOrDefault("Playlist"), videos, null)
+        }.getOrDefault(PlaylistPage("Playlist", emptyList(), null))
+    }
 
     private fun List<VideoStream>.progressive() = filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && it.isUrl }
     @JvmName("progressiveAudio")

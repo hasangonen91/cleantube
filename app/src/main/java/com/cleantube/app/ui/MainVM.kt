@@ -27,6 +27,7 @@ class MainVM : ViewModel() {
 
     // Home
     var home by mutableStateOf<List<Video>>(emptyList())
+    var homePlaylists by mutableStateOf<List<PlaylistItem>>(emptyList())
     var homeLoading by mutableStateOf(false)
     var homeLoadingMore by mutableStateOf(false)
     var homeNextPage by mutableStateOf<Any?>(null)
@@ -137,9 +138,18 @@ class MainVM : ViewModel() {
 
     fun loadCategory(index: Int, name: String) = viewModelScope.launch {
         categoryIndex = index
-        if (index == 0) { loadHome(); return@launch }
-        homeLoading = true; homeError = null; homeNextPage = null
-        try { val p = Repo.feedPage(name); home = p.videos; homeNextPage = p.nextPage } catch (e: Exception) { homeError = e.message ?: "Yüklenemedi" }
+        if (index == 0) { homePlaylists = emptyList(); loadHome(); return@launch }
+        homeLoading = true; homeError = null; homeNextPage = null; homePlaylists = emptyList()
+        try {
+            if (name == "Mixler") {
+                val s = Repo.searchPage("mix playlist müzik")
+                home = s.videos
+                homePlaylists = s.playlists
+                homeNextPage = s.nextPage
+            } else {
+                val p = Repo.feedPage(name); home = p.videos; homeNextPage = p.nextPage
+            }
+        } catch (e: Exception) { homeError = e.message ?: "Yüklenemedi" }
         homeLoading = false
     }
 
@@ -309,6 +319,15 @@ class MainVM : ViewModel() {
         val ok = InnerTube.postComment(videoId, text.trim()).isSuccess
         if (ok) loadComments(videoId)
         onResult(ok)
+    }
+
+    fun playPlaylist(item: PlaylistItem) = viewModelScope.launch {
+        homeLoading = homeLoading // no-op to keep state; use libLoading indicator via toast is overkill
+        try {
+            val p = Repo.playlistPage(item.id)
+            if (p.videos.isNotEmpty()) play(p.videos.first(), p.videos)
+            else homeError = "Playlist boş veya açılamadı"
+        } catch (e: Exception) { homeError = e.message ?: "Playlist açılamadı" }
     }
 
     fun play(video: Video, fromList: List<Video> = emptyList()) {

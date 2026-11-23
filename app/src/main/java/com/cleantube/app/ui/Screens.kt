@@ -159,6 +159,25 @@ fun HomeScreen(vm: MainVM) {
                 }
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     if (vm.categoryIndex == 0 && vm.shorts.isNotEmpty()) item { ShortsShelf(vm) }
+                    if (vm.homePlaylists.isNotEmpty()) {
+                        item { Text("Mixler ve oynatma listeleri", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                        item {
+                            LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(vm.homePlaylists, key = { "hp_${it.id}" }) { p ->
+                                    Column(Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)).clickable { vm.playPlaylist(p) }.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f))) {
+                                        Box(Modifier.fillMaxWidth().height(124.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                                            if (p.thumb.isNotBlank()) AsyncImage(p.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                            Box(Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color(0xCC000000), RoundedCornerShape(6.dp)).padding(horizontal=6.dp, vertical=2.dp)) { Text(p.count.ifBlank { "Mix" }, color=Color.White, fontSize=11.sp) }
+                                        }
+                                        Column(Modifier.padding(8.dp)) {
+                                            Text(p.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                            if (p.author.isNotBlank()) Text(p.author, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     items(vm.home, key = { "h_${it.id}" }) { v ->
                         VideoCard(v, onClick = { vm.play(v, vm.home) }, onChannel = { if (v.channelId.isNotBlank()) vm.openChannel(v.channelId) else if (v.channel.isNotBlank()) vm.openChannel(v.channel) })
                     }
@@ -206,26 +225,30 @@ private fun ShortsShelf(vm: MainVM) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ShortsScreen(vm: MainVM) {
-    if (vm.shorts.isEmpty()) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val items = vm.shorts
+    if (items.isEmpty()) {
         if (vm.shortsLoading) Loading() else ErrorView("Shorts yüklenemedi.", { vm.loadShorts() })
         return
     }
-    val pager = rememberPagerState(pageCount = { vm.shorts.size })
-    LaunchedEffect(pager, vm.shorts.size, vm.shortsNextPage, vm.shortsLoadingMore) {
-        snapshotFlow { pager.currentPage }.collect { page ->
-            if (vm.shortsNextPage != null && !vm.shortsLoadingMore && page >= vm.shorts.size - 3) vm.shortsLoadMore()
+    val pager = rememberPagerState(pageCount = { items.size.coerceAtLeast(1) })
+    LaunchedEffect(pager, items.size, vm.shortsNextPage, vm.shortsLoadingMore) {
+        snapshotFlow { runCatching { pager.currentPage }.getOrDefault(0) }.collect { page ->
+            if (vm.shortsNextPage != null && !vm.shortsLoadingMore && page >= items.size - 3) vm.shortsLoadMore()
         }
     }
-    VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        val video = vm.shorts[page]
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+    VerticalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items.getOrNull(it)?.id ?: it }) { page ->
+        val video = items.getOrNull(page) ?: return@VerticalPager
+        Box(Modifier.fillMaxSize().background(Color.Black).clickable { vm.play(video, items) }) {
             AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color(0xCC000000)))))
+            // Play hint overlay
+            Icon(Icons.Filled.PlayArrow, contentDescription = "Oynat", tint = Color.White.copy(alpha = .9f), modifier = Modifier.align(Alignment.Center).size(64.dp).background(Color(0x66000000), CircleShape).padding(12.dp))
             Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 72.dp, bottom = 24.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(32.dp).clip(CircleShape).background(Color.Gray), Alignment.Center) { Text(video.channel.take(1).uppercase(), color = Color.White, fontSize = 12.sp) }
                     Spacer(Modifier.width(8.dp))
-                    Text(video.channel, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text(video.channel, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = { if (video.channelId.isNotBlank()) vm.toggleSub(video.channelId) }, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(30.dp)) {
                         Text("Abone ol", fontSize = 12.sp, color = Color.White)
@@ -235,10 +258,13 @@ fun ShortsScreen(vm: MainVM) {
                 Text(video.title, color = Color.White, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                IconButton(onClick = { vm.play(video, vm.shorts) }) { Icon(Icons.Filled.PlayArrow, "Oynat", tint = Color.White, modifier = Modifier.size(30.dp)) }
+                IconButton(onClick = { vm.play(video, items) }) { Icon(Icons.Filled.PlayArrow, "Oynat", tint = Color.White, modifier = Modifier.size(30.dp)) }
                 IconButton(onClick = { vm.toggleLike(video.id) }) { Icon(Icons.Filled.ThumbUp, "Beğen", tint = Color.White) }
-                IconButton(onClick = { }) { Icon(Icons.Filled.Comment, "Yorum", tint = Color.White) }
-                IconButton(onClick = { }) { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }
+                IconButton(onClick = { vm.play(video, items) }) { Icon(Icons.Filled.Comment, "Yorum", tint = Color.White) }
+                IconButton(onClick = {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://youtu.be/${video.id}") }
+                    context.startActivity(android.content.Intent.createChooser(intent, "Paylaş"))
+                }) { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }
             }
         }
     }
@@ -344,13 +370,18 @@ fun SearchScreen(vm: MainVM) {
                         }
                     }
                     if (vm.searchPlaylists.isNotEmpty()) {
-                        item { Text("Oynatma listeleri", Modifier.padding(12.dp), fontWeight = FontWeight.Bold) }
-                        items(vm.searchPlaylists.take(5), key = { "p_${it.id}" }) { p ->
+                        item { Text("Oynatma listeleri / Mixler", Modifier.padding(12.dp), fontWeight = FontWeight.Bold) }
+                        items(vm.searchPlaylists.take(6), key = { "p_${it.id}" }) { p ->
                             ListItem(
                                 headlineContent = { Text(p.title) },
                                 supportingContent = { Text(listOf(p.author, p.count).filter { it.isNotBlank() }.joinToString(" • ")) },
-                                leadingContent = { Icon(Icons.Filled.PlaylistPlay, null) },
-                                modifier = Modifier.clickable { vm.openSection(Section(p.title, "VL" + p.id.removePrefix("VL"))) },
+                                leadingContent = {
+                                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), Alignment.Center) {
+                                        if (p.thumb.isNotBlank()) AsyncImage(p.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        else Icon(Icons.Filled.PlaylistPlay, null)
+                                    }
+                                },
+                                modifier = Modifier.clickable { vm.playPlaylist(p) },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                             )
                         }
@@ -435,7 +466,8 @@ fun LibraryScreen(vm: MainVM) {
                     if (vm.libPlaylists.isEmpty()) item { ErrorView("Oynatma listesi bulunamadı (giriş gerekebilir).", null) }
                     items(vm.libPlaylists, key = { it.id }) { p ->
                         ListItem(headlineContent = { Text(p.title) }, supportingContent = { if (p.count.isNotBlank()) Text(p.count) },
-                            modifier = Modifier.clickable { vm.openSection(Section(p.title, "VL" + p.id)) }, colors = ListItemDefaults.colors(containerColor = Color.Transparent))
+                            leadingContent = { Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), Alignment.Center) { if (p.thumb.isNotBlank()) AsyncImage(p.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) else Icon(Icons.Filled.PlaylistPlay, null) } },
+                            modifier = Modifier.clickable { vm.playPlaylist(p) }, colors = ListItemDefaults.colors(containerColor = Color.Transparent))
                     }
                     if (vm.libContinuation != null) item {
                         Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
