@@ -45,6 +45,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.cleantube.app.data.*
 
@@ -232,40 +237,146 @@ fun ShortsScreen(vm: MainVM) {
         return
     }
     val pager = rememberPagerState(pageCount = { items.size.coerceAtLeast(1) })
+    var settledPage by remember { mutableIntStateOf(0) }
+    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+
+    LaunchedEffect(Unit) {
+        runCatching { context.startService(android.content.Intent(context, com.cleantube.app.player.PlaybackService::class.java)) }
+        repeat(80) { com.cleantube.app.player.PlaybackService.sharedPlayer?.let { player = it; return@LaunchedEffect }; kotlinx.coroutines.delay(50) }
+    }
+
     LaunchedEffect(pager, items.size, vm.shortsNextPage, vm.shortsLoadingMore) {
-        snapshotFlow { runCatching { pager.currentPage }.getOrDefault(0) }.collect { page ->
+        snapshotFlow { runCatching { pager.settledPage }.getOrDefault(0) }.collect { page ->
+            settledPage = page
             if (vm.shortsNextPage != null && !vm.shortsLoadingMore && page >= items.size - 3) vm.shortsLoadMore()
         }
     }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            val p = player
+            if (p != null) { runCatching { p.stop(); p.clearMediaItems() } }
+        }
+    }
+
     VerticalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items.getOrNull(it)?.id ?: it }) { page ->
         val video = items.getOrNull(page) ?: return@VerticalPager
-        Box(Modifier.fillMaxSize().background(Color.Black).clickable { vm.play(video, items) }) {
-            AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color(0xCC000000)))))
-            // Play hint overlay
-            Icon(Icons.Filled.PlayArrow, contentDescription = "Oynat", tint = Color.White.copy(alpha = .9f), modifier = Modifier.align(Alignment.Center).size(64.dp).background(Color(0x66000000), CircleShape).padding(12.dp))
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 72.dp, bottom = 24.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(32.dp).clip(CircleShape).background(Color.Gray), Alignment.Center) { Text(video.channel.take(1).uppercase(), color = Color.White, fontSize = 12.sp) }
-                    Spacer(Modifier.width(8.dp))
-                    Text(video.channel, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { if (video.channelId.isNotBlank()) vm.toggleSub(video.channelId) }, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(30.dp)) {
-                        Text("Abone ol", fontSize = 12.sp, color = Color.White)
+        val isActive = page == settledPage
+        ShortPage(
+            vm = vm,
+            video = video,
+            isActive = isActive,
+            player = if (isActive) player else null,
+            onShare = {
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://youtu.be/${video.id}") }
+                context.startActivity(android.content.Intent.createChooser(intent, "Paylaş"))
+            }
+        )
+    }
+}
+
+@Composable
+private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPlayer?, onShare: () -> Unit) {
+    var loading by remember(video.id, isActive) { mutableStateOf(isActive) }
+    var error by remember(video.id, isActive) { mutableStateOf<String?>(null) }
+    var isPlaying by remember(video.id, isActive) { mutableStateOf(false) }
+    var loadedFor by remember(video.id) { mutableStateOf(false) }
+    var retryTick by remember(video.id) { mutableIntStateOf(0) }
+
+    LaunchedEffect(isActive, player, video.id, retryTick) {
+        val p = player ?: return@LaunchedEffect
+        if (!isActive) return@LaunchedEffect
+        loading = true; error = null
+        try {
+            val info = Repo.resolve(video.id)
+            val factory = DefaultHttpDataSource.Factory()
+                .setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(20_000).setReadTimeoutMs(30_000)
+            val src = Repo.buildSource(info, vm.defaultQuality, factory) ?: run { error = "Akış bulunamadı"; loading = false; return@LaunchedEffect }
+            p.stop(); p.clearMediaItems()
+            p.setMediaSource(src)
+            p.repeatMode = Player.REPEAT_MODE_ONE
+            p.prepare()
+            p.playWhenReady = true
+            loadedFor = true
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            error = e.message ?: "Short oynatılamadı"
+        } finally { loading = false }
+    }
+
+    DisposableEffect(isActive, player, video.id) {
+        val p = player ?: return@DisposableEffect onDispose {}
+        if (!isActive) return@DisposableEffect onDispose {}
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = e.localizedMessage ?: "Oynatma hatası" }
+        }
+        p.addListener(listener)
+        isPlaying = p.isPlaying
+        onDispose { runCatching { p.removeListener(listener) } }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (isActive && player != null) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        this.player = player
+                        useController = false
+                        keepScreenOn = true
                     }
-                }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize()
+            )
+            if (!isPlaying) {
+                // Tap to pause/play
+                Box(Modifier.fillMaxSize().clickable {
+                    if (player.isPlaying) player.pause() else player.play()
+                })
+            } else {
+                Box(Modifier.fillMaxSize().clickable {
+                    if (player.isPlaying) player.pause() else player.play()
+                })
+            }
+        } else {
+            AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color(0xCC000000)))))
+        if (isActive && loading) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+        if (isActive && error != null) {
+            Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(error ?: "Hata", color = Color.White)
                 Spacer(Modifier.height(8.dp))
-                Text(video.title, color = Color.White, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Button(onClick = { error = null; loadedFor = false; retryTick++ }) { Text("Tekrar dene") }
             }
-            Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                IconButton(onClick = { vm.play(video, items) }) { Icon(Icons.Filled.PlayArrow, "Oynat", tint = Color.White, modifier = Modifier.size(30.dp)) }
-                IconButton(onClick = { vm.toggleLike(video.id) }) { Icon(Icons.Filled.ThumbUp, "Beğen", tint = Color.White) }
-                IconButton(onClick = { vm.play(video, items) }) { Icon(Icons.Filled.Comment, "Yorum", tint = Color.White) }
-                IconButton(onClick = {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://youtu.be/${video.id}") }
-                    context.startActivity(android.content.Intent.createChooser(intent, "Paylaş"))
-                }) { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }
+        }
+        if (isActive && !loading && error == null && !isPlaying && loadedFor) {
+            Icon(Icons.Filled.PlayArrow, contentDescription = "Oynat", tint = Color.White.copy(alpha = .9f), modifier = Modifier.align(Alignment.Center).size(64.dp).background(Color(0x66000000), CircleShape).padding(12.dp))
+        }
+
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 72.dp, bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(32.dp).clip(CircleShape).background(Color.Gray), Alignment.Center) { Text(video.channel.take(1).uppercase(), color = Color.White, fontSize = 12.sp) }
+                Spacer(Modifier.width(8.dp))
+                Text(video.channel, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { if (video.channelId.isNotBlank()) vm.toggleSub(video.channelId) }, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(30.dp)) {
+                    Text("Abone ol", fontSize = 12.sp, color = Color.White)
+                }
             }
+            Spacer(Modifier.height(8.dp))
+            Text(video.title, color = Color.White, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            IconButton(onClick = { if (isActive && player != null) { if (player.isPlaying) player.pause() else player.play() } }) {
+                Icon(if (isActive && isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Oynat/Duraklat", tint = Color.White, modifier = Modifier.size(30.dp))
+            }
+            IconButton(onClick = { vm.toggleLike(video.id) }) { Icon(Icons.Filled.ThumbUp, "Beğen", tint = Color.White) }
+            IconButton(onClick = { vm.play(video, vm.shorts) }) { Icon(Icons.Filled.Comment, "Yorumlar", tint = Color.White) }
+            IconButton(onClick = onShare) { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }
         }
     }
 }
