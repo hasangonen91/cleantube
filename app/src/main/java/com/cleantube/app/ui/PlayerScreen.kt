@@ -140,11 +140,9 @@ fun PlayerSheet(vm: MainVM) {
         repeat(80) { PlaybackService.sharedPlayer?.let { player = it; return@LaunchedEffect }; delay(50) }
         error = "Medya servisi başlatılamadı"
     }
-    val activePlayer = player ?: run {
-        Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }; return
-    }
 
-    DisposableEffect(activePlayer, video.id) {
+    DisposableEffect(player, video.id) {
+        val ap = player ?: return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onPlayerError(e: PlaybackException) { error = e.localizedMessage ?: "Video akışı oynatılamadı" }
             override fun onIsPlayingChanged(p: Boolean) { isPlaying = p }
@@ -152,9 +150,9 @@ fun PlayerSheet(vm: MainVM) {
                 if (state == Player.STATE_ENDED && (vm.autoplay || vm.repeatMode > 0)) vm.playNext(auto = true)
             }
         }
-        activePlayer.addListener(listener)
-        isPlaying = activePlayer.isPlaying
-        onDispose { activePlayer.removeListener(listener) }
+        ap.addListener(listener)
+        isPlaying = ap.isPlaying
+        onDispose { ap.removeListener(listener) }
     }
 
     DisposableEffect(full) {
@@ -177,26 +175,28 @@ fun PlayerSheet(vm: MainVM) {
         }
     }
 
-    LaunchedEffect(video.id) {
+    LaunchedEffect(video.id, player) {
+        val ap = player ?: return@LaunchedEffect
         info = null; error = null
-        activePlayer.stop(); activePlayer.clearMediaItems()
+        ap.stop(); ap.clearMediaItems()
         try { info = Repo.resolve(video.id); vm.currentStreamInfo = info } catch (e: Exception) { error = e.message ?: "Video açılamadı" }
     }
-    LaunchedEffect(info, maxH) {
+    LaunchedEffect(info, maxH, player) {
+        val ap = player ?: return@LaunchedEffect
         val i = info ?: return@LaunchedEffect
         try {
-            val keepPos = if (loadedFor == video.id) activePlayer.currentPosition else LocalStore.getProgress(video.id)
+            val keepPos = if (loadedFor == video.id) ap.currentPosition else LocalStore.getProgress(video.id)
             // Offline playback: prefer completed local download
             val localFile = runCatching {
                 val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 dir.listFiles()?.firstOrNull { it.name.contains(video.id) && it.exists() && it.length() > 0 }
             }.getOrNull()
             if (localFile != null) {
-                activePlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(localFile)))
-                activePlayer.prepare()
-                if (keepPos > 0) activePlayer.seekTo(keepPos)
-                activePlayer.setPlaybackSpeed(vm.playbackSpeed)
-                activePlayer.playWhenReady = true
+                ap.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(localFile)))
+                ap.prepare()
+                if (keepPos > 0) ap.seekTo(keepPos)
+                ap.setPlaybackSpeed(vm.playbackSpeed)
+                ap.playWhenReady = true
                 loadedFor = video.id
                 return@LaunchedEffect
             }
@@ -204,27 +204,29 @@ fun PlayerSheet(vm: MainVM) {
                 .setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(20_000).setReadTimeoutMs(30_000)
             val src = Repo.buildSource(i, maxH, factory) ?: run { error = "Uyumlu akış bulunamadı"; return@LaunchedEffect }
-            activePlayer.setMediaSource(src); activePlayer.prepare()
-            if (keepPos > 0) activePlayer.seekTo(keepPos)
-            activePlayer.setPlaybackSpeed(vm.playbackSpeed)
-            activePlayer.playWhenReady = true
+            ap.setMediaSource(src); ap.prepare()
+            if (keepPos > 0) ap.seekTo(keepPos)
+            ap.setPlaybackSpeed(vm.playbackSpeed)
+            ap.playWhenReady = true
             loadedFor = video.id
         } catch (e: Exception) { error = e.localizedMessage ?: "Video hazırlanırken hata oluştu" }
     }
 
-    LaunchedEffect(video.id, loadedFor) {
+    LaunchedEffect(video.id, loadedFor, player) {
+        val ap = player ?: return@LaunchedEffect
         if (loadedFor != video.id) return@LaunchedEffect
         while (true) {
-            val p = activePlayer.currentPosition
-            val d = activePlayer.duration.coerceAtLeast(0L)
+            val p = ap.currentPosition
+            val d = ap.duration.coerceAtLeast(0L)
             if (p > 5_000) LocalStore.saveProgress(video.id, p, d)
             delay(5000)
         }
     }
-    DisposableEffect(video.id) {
+    DisposableEffect(video.id, player) {
+        val ap = player ?: return@DisposableEffect onDispose {}
         onDispose {
-            val p = activePlayer.currentPosition
-            val d = activePlayer.duration.coerceAtLeast(0L)
+            val p = ap.currentPosition
+            val d = ap.duration.coerceAtLeast(0L)
             if (p > 0) kotlinx.coroutines.runBlocking { LocalStore.saveProgress(video.id, p, d) }
         }
     }
@@ -240,6 +242,22 @@ fun PlayerSheet(vm: MainVM) {
         }
     }
 
+    val ap = player
+    if (ap == null) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (error != null) {
+                    Text(error ?: "Hata", color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { vm.minimizePlayer() }) { Text("Kapat") }
+                } else {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+        return
+    }
+
     val share = {
         val intent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, "https://youtu.be/${video.id}") }
         ctx.startActivity(Intent.createChooser(intent, "Paylaş"))
@@ -250,8 +268,8 @@ fun PlayerSheet(vm: MainVM) {
         if (inPip) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { c -> PlayerView(c).apply { this.player = activePlayer; useController = false } },
-                update = { it.player = activePlayer }
+                factory = { c -> PlayerView(c).apply { this.player = ap; useController = false } },
+                update = { it.player = ap }
             )
             return@Surface
         }
@@ -259,8 +277,8 @@ fun PlayerSheet(vm: MainVM) {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { c -> PlayerView(c).apply { this.player = activePlayer; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
-                    update = { it.player = activePlayer }
+                    factory = { c -> PlayerView(c).apply { this.player = ap; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
+                    update = { it.player = ap }
                 )
             }
             return@Surface
@@ -269,8 +287,8 @@ fun PlayerSheet(vm: MainVM) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { c -> PlayerView(c).apply { this.player = activePlayer; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
-                    update = { it.player = activePlayer }
+                    factory = { c -> PlayerView(c).apply { this.player = ap; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
+                    update = { it.player = ap }
                 )
                 if (info == null && error == null) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
                 error?.let {
@@ -344,7 +362,7 @@ fun PlayerSheet(vm: MainVM) {
                                 title = { Text("Altyazılar (CC)") }, text = {
                                     Column {
                                         TextButton(onClick = {
-                                            activePlayer.trackSelectionParameters = activePlayer.trackSelectionParameters.buildUpon()
+                                            ap.trackSelectionParameters = ap.trackSelectionParameters.buildUpon()
                                                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                                             showSubs = false
                                         }) { Text("Kapalı") }
@@ -352,7 +370,7 @@ fun PlayerSheet(vm: MainVM) {
                                         else subs.take(30).forEach { s ->
                                             val lang = runCatching { s.languageTag }.getOrNull().orEmpty().ifBlank { "und" }
                                             TextButton(onClick = {
-                                                activePlayer.trackSelectionParameters = activePlayer.trackSelectionParameters.buildUpon()
+                                                ap.trackSelectionParameters = ap.trackSelectionParameters.buildUpon()
                                                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                                                     .setPreferredTextLanguage(lang).build()
                                                 showSubs = false
@@ -366,7 +384,7 @@ fun PlayerSheet(vm: MainVM) {
                             AlertDialog(onDismissRequest = { showSpeed = false }, confirmButton = { TextButton(onClick = { showSpeed = false }) { Text("Tamam") } },
                                 title = { Text("Oynatma hızı") }, text = {
                                     Column { listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { s ->
-                                        Row(Modifier.fillMaxWidth().clickable { vm.setSpeedValue(s); activePlayer.setPlaybackSpeed(s); showSpeed = false }.padding(12.dp)) {
+                                        Row(Modifier.fillMaxWidth().clickable { vm.setSpeedValue(s); ap.setPlaybackSpeed(s); showSpeed = false }.padding(12.dp)) {
                                             Text("${s}x", fontWeight = if (s == vm.playbackSpeed) FontWeight.Bold else FontWeight.Normal)
                                         }
                                     } }
