@@ -278,20 +278,25 @@ fun ShortsScreen(vm: MainVM) {
 @Composable
 private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPlayer?, onShare: () -> Unit) {
     var loading by remember(video.id, isActive) { mutableStateOf(isActive) }
+    var buffering by remember(video.id, isActive) { mutableStateOf(false) }
     var error by remember(video.id, isActive) { mutableStateOf<String?>(null) }
     var isPlaying by remember(video.id, isActive) { mutableStateOf(false) }
     var loadedFor by remember(video.id) { mutableStateOf(false) }
     var retryTick by remember(video.id) { mutableIntStateOf(0) }
+    var showQuality by remember(video.id) { mutableStateOf(false) }
+    var progress by remember(video.id) { mutableStateOf(0f) }
+    var buffered by remember(video.id) { mutableStateOf(0f) }
 
-    LaunchedEffect(isActive, player, video.id, retryTick) {
+    LaunchedEffect(isActive, player, video.id, retryTick, vm.defaultQuality) {
         val p = player ?: return@LaunchedEffect
-        if (!isActive) return@LaunchedEffect
-        loading = true; error = null
+        if (!isActive) { return@LaunchedEffect }
+        kotlinx.coroutines.delay(120) // fast swipe debounce
+        loading = true; error = null; buffering = false
         try {
             val info = Repo.resolve(video.id)
             val factory = DefaultHttpDataSource.Factory()
                 .setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(20_000).setReadTimeoutMs(30_000)
+                .setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000)
             val src = Repo.buildSource(info, vm.defaultQuality, factory) ?: run { error = "Akış bulunamadı"; loading = false; return@LaunchedEffect }
             p.stop(); p.clearMediaItems()
             p.setMediaSource(src)
@@ -310,11 +315,26 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
         if (!isActive) return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
-            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = e.localizedMessage ?: "Oynatma hatası" }
+            override fun onPlaybackStateChanged(state: Int) { buffering = state == Player.STATE_BUFFERING }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = e.localizedMessage ?: "Oynatma hatası"; buffering = false }
         }
         p.addListener(listener)
         isPlaying = p.isPlaying
+        buffering = p.playbackState == Player.STATE_BUFFERING
         onDispose { runCatching { p.removeListener(listener) } }
+    }
+
+    LaunchedEffect(isActive, player, video.id) {
+        val p = player ?: return@LaunchedEffect
+        if (!isActive) return@LaunchedEffect
+        while (true) {
+            val dur = p.duration.takeIf { it > 0 } ?: 0L
+            val pos = p.currentPosition.coerceAtLeast(0L)
+            val buf = p.bufferedPosition.coerceAtLeast(0L)
+            progress = if (dur > 0) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+            buffered = if (dur > 0) (buf.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+            kotlinx.coroutines.delay(250)
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -325,27 +345,31 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
                         this.player = player
                         useController = false
                         keepScreenOn = true
+                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     }
                 },
-                update = { it.player = player },
+                update = { it.player = player; it.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM },
                 modifier = Modifier.fillMaxSize()
             )
-            if (!isPlaying) {
-                // Tap to pause/play
-                Box(Modifier.fillMaxSize().clickable {
-                    if (player.isPlaying) player.pause() else player.play()
-                })
-            } else {
-                Box(Modifier.fillMaxSize().clickable {
-                    if (player.isPlaying) player.pause() else player.play()
-                })
-            }
+            Box(Modifier.fillMaxSize().clickable {
+                if (player.isPlaying) player.pause() else player.play()
+            })
         } else {
             AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
 
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color(0xCC000000)))))
-        if (isActive && loading) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x22000000), Color(0xAA000000)))))
+
+        // Top bar
+        Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Shorts", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Spacer(Modifier.weight(1f))
+            AssistChip(onClick = { showQuality = true }, label = { Text("${vm.defaultQuality}p", color = Color.White, fontSize = 12.sp) }, colors = AssistChipDefaults.assistChipColors(containerColor = Color(0x55000000)))
+        }
+
+        if (isActive && (loading || buffering)) {
+            CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White, strokeWidth = 3.dp)
+        }
         if (isActive && error != null) {
             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(error ?: "Hata", color = Color.White)
@@ -353,30 +377,58 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
                 Button(onClick = { error = null; loadedFor = false; retryTick++ }) { Text("Tekrar dene") }
             }
         }
-        if (isActive && !loading && error == null && !isPlaying && loadedFor) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = "Oynat", tint = Color.White.copy(alpha = .9f), modifier = Modifier.align(Alignment.Center).size(64.dp).background(Color(0x66000000), CircleShape).padding(12.dp))
+        if (isActive && !loading && !buffering && error == null && !isPlaying && loadedFor) {
+            Icon(Icons.Filled.PlayArrow, contentDescription = "Oynat", tint = Color.White.copy(alpha = .92f), modifier = Modifier.align(Alignment.Center).size(72.dp).background(Color(0x66000000), CircleShape).padding(16.dp))
         }
 
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 16.dp, end = 72.dp, bottom = 24.dp)) {
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 14.dp, end = 84.dp, bottom = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(32.dp).clip(CircleShape).background(Color.Gray), Alignment.Center) { Text(video.channel.take(1).uppercase(), color = Color.White, fontSize = 12.sp) }
+                Box(Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF444444)), Alignment.Center) { Text(video.channel.take(1).uppercase(), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.width(8.dp))
-                Text(video.channel, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(video.channel, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { if (video.channelId.isNotBlank()) vm.toggleSub(video.channelId) }, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(30.dp)) {
+                OutlinedButton(onClick = { if (video.channelId.isNotBlank()) vm.toggleSub(video.channelId) }, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp), modifier = Modifier.height(34.dp)) {
                     Text("Abone ol", fontSize = 12.sp, color = Color.White)
                 }
             }
             Spacer(Modifier.height(8.dp))
             Text(video.title, color = Color.White, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(4.dp))
+            Text(listOf(video.views, video.published).filter { it.isNotBlank() }.joinToString(" • "), color = Color.White.copy(alpha = .8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            IconButton(onClick = { if (isActive && player != null) { if (player.isPlaying) player.pause() else player.play() } }) {
-                Icon(if (isActive && isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Oynat/Duraklat", tint = Color.White, modifier = Modifier.size(30.dp))
-            }
-            IconButton(onClick = { vm.toggleLike(video.id) }) { Icon(Icons.Filled.ThumbUp, "Beğen", tint = Color.White) }
-            IconButton(onClick = { vm.play(video, vm.shorts) }) { Icon(Icons.Filled.Comment, "Yorumlar", tint = Color.White) }
-            IconButton(onClick = onShare) { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White) }
+
+        Column(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            IconButton(onClick = { vm.toggleLike(video.id) }) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.ThumbUp, "Beğen", tint = Color.White); Text("Beğen", color = Color.White, fontSize = 11.sp) } }
+            IconButton(onClick = { vm.play(video, vm.shorts) }) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.Comment, "Yorumlar", tint = Color.White); Text("Yorum", color = Color.White, fontSize = 11.sp) } }
+            IconButton(onClick = onShare) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.Share, "Paylaş", tint = Color.White); Text("Paylaş", color = Color.White, fontSize = 11.sp) } }
+            IconButton(onClick = { showQuality = true }) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.Settings, "Kalite", tint = Color.White); Text("${vm.defaultQuality}p", color = Color.White, fontSize = 11.sp) } }
+        }
+
+        // Bottom progress
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            LinearProgressIndicator(progress = buffered, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color.White.copy(alpha = .35f), trackColor = Color.White.copy(alpha = .12f))
+            LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color(0xFFFF0033), trackColor = Color.Transparent)
+        }
+
+        if (showQuality) {
+            AlertDialog(
+                onDismissRequest = { showQuality = false },
+                confirmButton = { TextButton(onClick = { showQuality = false }) { Text("Kapat") } },
+                title = { Text("Kalite / Veri Kullanımı") },
+                text = {
+                    Column {
+                        Text("Daha düşük kalite daha az veri harcar.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        listOf(360, 480, 720, 1080).forEach { q ->
+                            val selected = vm.defaultQuality == q
+                            TextButton(onClick = { vm.setQuality(q); showQuality = false; retryTick++ }, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (selected) "✓ ${q}p" else "${q}p", fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                        Text("Seçili: ${vm.defaultQuality}p • ${if (vm.defaultQuality <= 480) "Veri tasarrufu" else "Yüksek kalite"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            )
         }
     }
 }
