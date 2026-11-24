@@ -180,7 +180,7 @@ fun PlayerSheet(vm: MainVM) {
         val ap = player ?: return@LaunchedEffect
         info = null; error = null
         ap.stop(); ap.clearMediaItems()
-        try { info = Repo.resolve(video.id); vm.currentStreamInfo = info } catch (e: Exception) { error = e.message ?: "Video açılamadı" }
+        try { info = Repo.resolve(video.id); vm.currentStreamInfo = info } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "Video açılamadı" }
     }
     LaunchedEffect(info, maxH, player) {
         val ap = player ?: return@LaunchedEffect
@@ -210,7 +210,7 @@ fun PlayerSheet(vm: MainVM) {
             ap.setPlaybackSpeed(vm.playbackSpeed)
             ap.playWhenReady = true
             loadedFor = video.id
-        } catch (e: Exception) { error = e.localizedMessage ?: "Video hazırlanırken hata oluştu" }
+        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.localizedMessage ?: "Video hazırlanırken hata oluştu" }
     }
 
     LaunchedEffect(video.id, loadedFor, player) {
