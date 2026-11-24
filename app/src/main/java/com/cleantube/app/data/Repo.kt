@@ -152,12 +152,20 @@ object Repo {
     suspend fun homeMore(page: Page): VideoPage = withContext(Dispatchers.IO) { VideoPage(emptyList(), null) }
 
     suspend fun shortsPage(): VideoPage = withContext(Dispatchers.IO) {
-        val vids = searchPage("YouTube Shorts popüler").videos.filter {
-            val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
-                .fold(0L) { total, part -> total * 60 + part }
-            seconds in 1..61 || it.isShort
-        }.distinctBy { it.id }
-        VideoPage(vids, null)
+        val queries = listOf("shorts", "#shorts", "YouTube Shorts popüler")
+        for (q in queries) {
+            val page = runCatching { searchPage(q) }.getOrDefault(SearchPage(emptyList(), emptyList(), emptyList(), null))
+            val all = page.videos.distinctBy { it.id }
+            if (all.isEmpty()) continue
+            val filtered = all.filter {
+                val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
+                    .fold(0L) { total, part -> total * 60 + part }
+                seconds in 1..120 || it.isShort
+            }.distinctBy { it.id }
+            val vids = if (filtered.isNotEmpty()) filtered else all.take(20)
+            return@withContext VideoPage(vids, page.nextPage)
+        }
+        VideoPage(emptyList(), null)
     }
 
     suspend fun shorts(): List<Video> = shortsPage().videos

@@ -228,7 +228,7 @@ fun ShortsScreen(vm: MainVM) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val items = vm.shorts
     if (items.isEmpty()) {
-        if (vm.shortsLoading) Loading() else ErrorView("Shorts yüklenemedi.", { vm.loadShorts() })
+        if (vm.shortsLoading) Loading() else ErrorView(vm.shortsError ?: "Shorts yüklenemedi.", { vm.loadShorts() })
         return
     }
     val pager = rememberPagerState(pageCount = { items.size.coerceAtLeast(1) })

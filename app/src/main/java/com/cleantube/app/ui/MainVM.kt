@@ -38,6 +38,7 @@ class MainVM : ViewModel() {
     var shortsLoading by mutableStateOf(false)
     var shortsLoadingMore by mutableStateOf(false)
     var shortsNextPage by mutableStateOf<Any?>(null)
+    var shortsError by mutableStateOf<String?>(null)
 
     // Search
     var query by mutableStateOf("")
@@ -167,8 +168,9 @@ class MainVM : ViewModel() {
 
     fun loadShorts() = viewModelScope.launch {
         if (shorts.isNotEmpty()) return@launch
-        shortsLoading = true; shortsNextPage = null
-        try { val p = Repo.shortsPage(); shorts = p.videos; shortsNextPage = p.nextPage } catch (_: Exception) { shorts = emptyList() }
+        shortsLoading = true; shortsNextPage = null; shortsError = null
+        try { val p = Repo.shortsPage(); shorts = p.videos; shortsNextPage = p.nextPage; if (shorts.isEmpty()) shortsError = "Shorts bulunamadı" }
+        catch (e: Exception) { shorts = emptyList(); shortsError = e.message ?: "Shorts yüklenemedi" }
         shortsLoading = false
     }
 
