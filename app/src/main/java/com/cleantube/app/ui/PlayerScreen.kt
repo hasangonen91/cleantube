@@ -136,7 +136,8 @@ fun PlayerSheet(vm: MainVM) {
 
     var player by remember { mutableStateOf<ExoPlayer?>(null) }
     LaunchedEffect(Unit) {
-        ContextCompat.startForegroundService(ctx, Intent(ctx, PlaybackService::class.java))
+        runCatching { ctx.startService(Intent(ctx, PlaybackService::class.java)) }
+            .onFailure { runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, PlaybackService::class.java)) } }
         repeat(80) { PlaybackService.sharedPlayer?.let { player = it; return@LaunchedEffect }; delay(50) }
         error = "Medya servisi başlatılamadı"
     }
