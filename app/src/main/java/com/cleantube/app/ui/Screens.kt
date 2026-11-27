@@ -133,8 +133,9 @@ fun HomeScreen(vm: MainVM) {
             IconButton(onClick = { vm.showSearch = true }) { Icon(Icons.Filled.Search, "Ara") }
             IconButton(onClick = { vm.showCastInfo = true }) { Icon(Icons.Filled.Cast, "Yayınla (Cast)") }
             IconButton(onClick = { vm.showSettings = true }) { Icon(Icons.Filled.Settings, "Ayarlar") }
-            Box(Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary).clickable { if (!vm.loggedIn) vm.showLogin = true else vm.tab = RootTab.LIBRARY }, Alignment.Center) {
-                Text(if (vm.loggedIn) "H" else "?", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Box(Modifier.size(28.dp).clip(CircleShape).background(if (vm.loggedIn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant).clickable { if (!vm.loggedIn) vm.showLogin = true else vm.tab = RootTab.LIBRARY }, Alignment.Center) {
+                if (vm.loggedIn) Text("H", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                else Icon(Icons.Filled.Person, contentDescription = "Hesap", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(4.dp))
         }
@@ -231,24 +232,34 @@ private fun ShortsShelf(vm: MainVM) {
 @Composable
 fun ShortsScreen(vm: MainVM) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val items = vm.shorts
     if (items.isEmpty()) {
         if (vm.shortsLoading) Loading() else ErrorView(vm.shortsError ?: "Shorts yüklenemedi.", { vm.loadShorts() })
         return
     }
     val pager = rememberPagerState(pageCount = { items.size.coerceAtLeast(1) })
-    var settledPage by remember { mutableIntStateOf(0) }
+    var activePage by remember { mutableIntStateOf(0) }
     var player by remember { mutableStateOf<ExoPlayer?>(null) }
 
     LaunchedEffect(Unit) {
         runCatching { context.startService(android.content.Intent(context, com.cleantube.app.player.PlaybackService::class.java)) }
-        repeat(80) { com.cleantube.app.player.PlaybackService.sharedPlayer?.let { player = it; return@LaunchedEffect }; kotlinx.coroutines.delay(50) }
+        repeat(100) { com.cleantube.app.player.PlaybackService.sharedPlayer?.let { player = it; return@LaunchedEffect }; kotlinx.coroutines.delay(50) }
     }
 
-    LaunchedEffect(pager, items.size, vm.shortsNextPage, vm.shortsLoadingMore) {
-        snapshotFlow { runCatching { pager.settledPage }.getOrDefault(0) }.collect { page ->
-            settledPage = page
-            if (vm.shortsNextPage != null && !vm.shortsLoadingMore && page >= items.size - 3) vm.shortsLoadMore()
+    // Kaydirma sirasinda hedef ve sonraki sayfalari onceden cozumle -> akici gecis
+    LaunchedEffect(pager.currentPage, items.size) {
+        val target = pager.currentPage
+        Repo.prefetch(listOfNotNull(items.getOrNull(target)?.id, items.getOrNull(target + 1)?.id, items.getOrNull(target + 2)?.id))
+    }
+
+    LaunchedEffect(pager, items.size) {
+        snapshotFlow { pager.settledPage }.collect { page ->
+            activePage = page
+            // Onceki videonun sesi/görüntüsü devam etmesin
+            runCatching { player?.pause() }
+            Repo.prefetch(listOfNotNull(items.getOrNull(page + 1)?.id, items.getOrNull(page + 2)?.id))
+            if (page >= items.size - 3) vm.shortsLoadMore()
         }
     }
 
@@ -259,14 +270,19 @@ fun ShortsScreen(vm: MainVM) {
         }
     }
 
-    VerticalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items.getOrNull(it)?.id ?: it }) { page ->
+    VerticalPager(
+        state = pager,
+        modifier = Modifier.fillMaxSize().background(Color.Black),
+        beyondViewportPageCount = 1,
+        key = { items.getOrNull(it)?.id ?: it },
+    ) { page ->
         val video = items.getOrNull(page) ?: return@VerticalPager
-        val isActive = page == settledPage
         ShortPage(
             vm = vm,
             video = video,
-            isActive = isActive,
-            player = if (isActive) player else null,
+            isActive = page == activePage,
+            player = if (page == activePage) player else null,
+            onSkip = { if (page + 1 < items.size) scope.launch { runCatching { pager.animateScrollToPage(page + 1) } } },
             onShare = {
                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://youtu.be/${video.id}") }
                 context.startActivity(android.content.Intent.createChooser(intent, "Paylaş"))
@@ -276,38 +292,46 @@ fun ShortsScreen(vm: MainVM) {
 }
 
 @Composable
-private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPlayer?, onShare: () -> Unit) {
-    var loading by remember(video.id, isActive) { mutableStateOf(isActive) }
-    var buffering by remember(video.id, isActive) { mutableStateOf(false) }
-    var error by remember(video.id, isActive) { mutableStateOf<String?>(null) }
-    var isPlaying by remember(video.id, isActive) { mutableStateOf(false) }
-    var loadedFor by remember(video.id) { mutableStateOf(false) }
+private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPlayer?, onSkip: () -> Unit, onShare: () -> Unit) {
+    var loading by remember(video.id) { mutableStateOf(false) }
+    var buffering by remember(video.id) { mutableStateOf(false) }
+    var error by remember(video.id) { mutableStateOf<String?>(null) }
+    var isPlaying by remember(video.id) { mutableStateOf(false) }
     var retryTick by remember(video.id) { mutableIntStateOf(0) }
     var showQuality by remember(video.id) { mutableStateOf(false) }
-    var progress by remember(video.id) { mutableStateOf(0f) }
-    var buffered by remember(video.id) { mutableStateOf(0f) }
+    // Player'a bu video baglandi mi? Baglanana kadar kucuk resim goster (onceki video gorunmesin)
+    var attached by remember(video.id) { mutableStateOf(false) }
 
     LaunchedEffect(isActive, player, video.id, retryTick, vm.defaultQuality) {
         val p = player ?: return@LaunchedEffect
-        if (!isActive) { return@LaunchedEffect }
-        kotlinx.coroutines.delay(120) // fast swipe debounce
-        loading = true; error = null; buffering = false
+        if (!isActive) return@LaunchedEffect
+        loading = true; error = null; buffering = false; attached = false
         try {
-            val info = Repo.resolve(video.id)
             val factory = DefaultHttpDataSource.Factory()
                 .setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000)
-            val src = Repo.buildSource(info, vm.defaultQuality, factory) ?: run { error = "Akış bulunamadı"; loading = false; return@LaunchedEffect }
+            var src = runCatching { Repo.resolve(video.id) }.getOrNull()?.let { Repo.buildSource(it, vm.defaultQuality, factory, video.id) }
+            if (src == null) src = Repo.buildFallbackSource(video.id, vm.defaultQuality, factory)
+            if (src == null) throw IllegalStateException("Akış bulunamadı")
+            if (!isActive) return@LaunchedEffect
             p.stop(); p.clearMediaItems()
             p.setMediaSource(src)
             p.repeatMode = Player.REPEAT_MODE_ONE
             p.prepare()
             p.playWhenReady = true
-            loadedFor = true
+            attached = true
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             error = e.message ?: "Short oynatılamadı"
         } finally { loading = false }
+    }
+
+    // Oynatilamayan short'i YouTube gibi otomatik atla
+    LaunchedEffect(error) {
+        if (error != null) {
+            kotlinx.coroutines.delay(2500)
+            if (error != null) { error = null; onSkip() }
+        }
     }
 
     DisposableEffect(isActive, player, video.id) {
@@ -315,36 +339,26 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
         if (!isActive) return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
-            override fun onPlaybackStateChanged(state: Int) { buffering = state == Player.STATE_BUFFERING }
+            override fun onPlaybackStateChanged(state: Int) {
+                buffering = state == Player.STATE_BUFFERING && attached
+                if (state == Player.STATE_READY) buffering = false
+            }
             override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = e.localizedMessage ?: "Oynatma hatası"; buffering = false }
         }
         p.addListener(listener)
         isPlaying = p.isPlaying
-        buffering = p.playbackState == Player.STATE_BUFFERING
         onDispose { runCatching { p.removeListener(listener) } }
     }
 
-    LaunchedEffect(isActive, player, video.id) {
-        val p = player ?: return@LaunchedEffect
-        if (!isActive) return@LaunchedEffect
-        while (true) {
-            val dur = p.duration.takeIf { it > 0 } ?: 0L
-            val pos = p.currentPosition.coerceAtLeast(0L)
-            val buf = p.bufferedPosition.coerceAtLeast(0L)
-            progress = if (dur > 0) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
-            buffered = if (dur > 0) (buf.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
-            kotlinx.coroutines.delay(250)
-        }
-    }
-
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (isActive && player != null) {
+        if (isActive && player != null && attached) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         this.player = player
                         useController = false
                         keepScreenOn = true
+                        setShutterBackgroundColor(android.graphics.Color.BLACK)
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     }
                 },
@@ -356,6 +370,7 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
             })
         } else {
             AsyncImage(video.thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(Color(0x33000000)))
         }
 
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x22000000), Color(0xAA000000)))))
@@ -374,10 +389,10 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(error ?: "Hata", color = Color.White)
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = { error = null; loadedFor = false; retryTick++ }) { Text("Tekrar dene") }
+                Button(onClick = { error = null; attached = false; retryTick++ }) { Text("Tekrar dene") }
             }
         }
-        if (isActive && !loading && !buffering && error == null && !isPlaying && loadedFor) {
+        if (isActive && !loading && !buffering && error == null && !isPlaying && attached) {
             Icon(Icons.Filled.PlayArrow, contentDescription = "Oynat", tint = Color.White.copy(alpha = .92f), modifier = Modifier.align(Alignment.Center).size(72.dp).background(Color(0x66000000), CircleShape).padding(16.dp))
         }
 
@@ -404,11 +419,8 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
             IconButton(onClick = { showQuality = true }) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.Settings, "Kalite", tint = Color.White); Text("${vm.defaultQuality}p", color = Color.White, fontSize = 11.sp) } }
         }
 
-        // Bottom progress
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-            LinearProgressIndicator(progress = buffered, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color.White.copy(alpha = .35f), trackColor = Color.White.copy(alpha = .12f))
-            LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color(0xFFFF0033), trackColor = Color.Transparent)
-        }
+        // Bottom progress (sadece bu kucuk composable yenilenir)
+        ShortProgress(player, isActive, Modifier.align(Alignment.BottomCenter))
 
         if (showQuality) {
             AlertDialog(
@@ -430,6 +442,28 @@ private fun ShortPage(vm: MainVM, video: Video, isActive: Boolean, player: ExoPl
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun ShortProgress(player: ExoPlayer?, isActive: Boolean, modifier: Modifier = Modifier) {
+    var progress by remember { mutableFloatStateOf(0f) }
+    var buffered by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(player, isActive) {
+        val p = player ?: return@LaunchedEffect
+        if (!isActive) { progress = 0f; buffered = 0f; return@LaunchedEffect }
+        while (true) {
+            val dur = p.duration.takeIf { it > 0 } ?: 0L
+            val pos = p.currentPosition.coerceAtLeast(0L)
+            val buf = p.bufferedPosition.coerceAtLeast(0L)
+            progress = if (dur > 0) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+            buffered = if (dur > 0) (buf.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+            kotlinx.coroutines.delay(250)
+        }
+    }
+    Column(modifier.fillMaxWidth()) {
+        LinearProgressIndicator(progress = buffered, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color.White.copy(alpha = .35f), trackColor = Color.White.copy(alpha = .12f))
+        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color(0xFFFF0033), trackColor = Color.Transparent)
     }
 }
 
@@ -721,6 +755,8 @@ fun ChannelScreen(vm: MainVM) {
 @Composable
 fun SettingsScreen(vm: MainVM) {
     BackHandler { vm.showSettings = false }
+    var qMenu by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.showSettings = false }) { Icon(Icons.Filled.ArrowBack, null) }
@@ -729,12 +765,8 @@ fun SettingsScreen(vm: MainVM) {
         LazyColumn(Modifier.fillMaxSize()) {
             item { Text("Oynatma", Modifier.padding(16.dp), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary) }
             item {
-                var qMenu by remember { mutableStateOf(false) }
-                ListItem(headlineContent = { Text("Varsayılan kalite") }, supportingContent = { Text("${vm.defaultQuality}p") },
+                ListItem(headlineContent = { Text("Varsayılan kalite") }, supportingContent = { Text("${vm.defaultQuality}p • tüm videolarda geçerli") },
                     modifier = Modifier.clickable { qMenu = true }, colors = ListItemDefaults.colors(containerColor = Color.Transparent))
-                if (qMenu) AlertDialog(onDismissRequest = { qMenu = false }, confirmButton = {}, title = { Text("Kalite") }, text = {
-                    Column { listOf(360, 480, 720, 1080).forEach { q -> TextButton(onClick = { vm.setQuality(q); qMenu = false }) { Text("${q}p") } } }
-                })
             }
             item {
                 ListItem(headlineContent = { Text("Otomatik oynat") }, supportingContent = { Text("Sonraki videoya geç") },
@@ -773,7 +805,35 @@ fun SettingsScreen(vm: MainVM) {
                 ListItem(headlineContent = { Text("CleanTube") }, supportingContent = { Text("Reklamsız YouTube istemcisi • NewPipeExtractor + Media3 • Güvenli oturum") },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent))
             }
+            item {
+                ListItem(headlineContent = { Text("Güncellemeleri kontrol et") }, supportingContent = { Text("En son APK'yı GitHub'dan indir") },
+                    modifier = Modifier.clickable {
+                        runCatching {
+                            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/hasangonen91/cleantube/releases/latest")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent))
+            }
         }
+    }
+    if (qMenu) {
+        AlertDialog(
+            onDismissRequest = { qMenu = false },
+            confirmButton = { TextButton(onClick = { qMenu = false }) { Text("Kapat") } },
+            title = { Text("Varsayılan kalite") },
+            text = {
+                Column {
+                    Text("Videolar bu çözünürlüğe kadar oynatılır. Düşük kalite daha az veri harcar.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    listOf(360, 480, 720, 1080, 1440).forEach { q ->
+                        val selected = vm.defaultQuality == q
+                        TextButton(onClick = { vm.setQuality(q); qMenu = false }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (selected) "✓ ${q}p" else "${q}p", fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
+                }
+            }
+        )
     }
 }
 

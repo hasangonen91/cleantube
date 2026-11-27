@@ -169,19 +169,25 @@ class MainVM : ViewModel() {
     fun loadShorts() = viewModelScope.launch {
         if (shorts.isNotEmpty()) return@launch
         shortsLoading = true; shortsNextPage = null; shortsError = null
-        try { val p = Repo.shortsPage(); shorts = p.videos; shortsNextPage = p.nextPage; if (shorts.isEmpty()) shortsError = "Shorts bulunamadı" }
-        catch (t: Throwable) { if (t is kotlinx.coroutines.CancellationException) throw t; shorts = emptyList(); shortsError = t.message ?: "Shorts yüklenemedi" }
+        try {
+            val p = Repo.shortsPage()
+            shorts = p.videos
+            shortsNextPage = if (Repo.shortsHasMore) Unit else null
+            if (shorts.isEmpty()) shortsError = "Shorts bulunamadı"
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            shorts = emptyList(); shortsError = t.message ?: "Shorts yüklenemedi"
+        }
         shortsLoading = false
     }
 
     fun shortsLoadMore() = viewModelScope.launch {
-        val np = shortsNextPage as? org.schabi.newpipe.extractor.Page ?: return@launch
-        if (shortsLoadingMore) return@launch
+        if (shortsLoadingMore || !Repo.shortsHasMore) return@launch
         shortsLoadingMore = true
         try {
-            val p = Repo.shortsMore(np)
+            val p = Repo.shortsMore()
             shorts = (shorts + p.videos).distinctBy { it.id }
-            shortsNextPage = p.nextPage
+            shortsNextPage = if (Repo.shortsHasMore) Unit else null
         } catch (_: Exception) { shortsNextPage = null }
         shortsLoadingMore = false
     }

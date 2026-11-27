@@ -120,6 +120,7 @@ fun PlayerSheet(vm: MainVM) {
     var info by remember(video.id) { mutableStateOf<StreamInfo?>(null) }
     var error by remember(video.id) { mutableStateOf<String?>(null) }
     var maxH by remember(video.id) { mutableIntStateOf(vm.defaultQuality) }
+    LaunchedEffect(vm.defaultQuality) { if (maxH != vm.defaultQuality) maxH = vm.defaultQuality }
     var full by remember { mutableStateOf(false) }
     var showQ by remember { mutableStateOf(false) }
     var showSpeed by remember { mutableStateOf(false) }
@@ -185,11 +186,18 @@ fun PlayerSheet(vm: MainVM) {
         val ap = player ?: return@LaunchedEffect
         info = null; error = null
         ap.stop(); ap.clearMediaItems()
-        try { info = Repo.resolve(video.id); vm.currentStreamInfo = info } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "Video açılamadı" }
+        try {
+            info = Repo.resolve(video.id); vm.currentStreamInfo = info
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            // NewPipe/URLDecoder vb. hatalarda InnerTube fallback'i build asamasinda denenecek
+            android.util.Log.w("CleanTube", "resolve failed, will try fallback: ${e.message}")
+            info = null; vm.currentStreamInfo = null
+            error = null // build LaunchedEffect fallback deneyecek
+        }
     }
-    LaunchedEffect(info, maxH, player) {
+    LaunchedEffect(info, maxH, player, video.id) {
         val ap = player ?: return@LaunchedEffect
-        val i = info ?: return@LaunchedEffect
         try {
             val keepPos = if (loadedFor == video.id) ap.currentPosition else LocalStore.getProgress(video.id)
             // Offline playback: prefer completed local download
@@ -209,13 +217,23 @@ fun PlayerSheet(vm: MainVM) {
             val factory = DefaultHttpDataSource.Factory()
                 .setUserAgent(HttpDownloader.USER_AGENT).setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(20_000).setReadTimeoutMs(30_000)
-            val src = Repo.buildSource(i, maxH, factory) ?: run { error = "Uyumlu akış bulunamadı"; return@LaunchedEffect }
-            ap.setMediaSource(src); ap.prepare()
+            val i = info
+            val src = if (i != null) Repo.buildSource(i, maxH, factory, video.id) else null
+            val finalSrc = src ?: Repo.buildFallbackSource(video.id, maxH, factory)
+            if (finalSrc == null) {
+                if (i == null) { error = "Video açılamadı. Bağlantıyı kontrol edip tekrar dene."; return@LaunchedEffect }
+                error = "Uyumlu akış bulunamadı"; return@LaunchedEffect
+            }
+            ap.setMediaSource(finalSrc); ap.prepare()
             if (keepPos > 0) ap.seekTo(keepPos)
             ap.setPlaybackSpeed(vm.playbackSpeed)
             ap.playWhenReady = true
             loadedFor = video.id
-        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.localizedMessage ?: "Video hazırlanırken hata oluştu" }
+            error = null
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            error = e.localizedMessage ?: "Video hazırlanırken hata oluştu"
+        }
     }
 
     LaunchedEffect(video.id, loadedFor, player) {
@@ -297,8 +315,8 @@ fun PlayerSheet(vm: MainVM) {
         if (inPip) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { c -> PlayerView(c).apply { this.player = ap; useController = false } },
-                update = { it.player = ap }
+                factory = { c -> PlayerView(c).apply { this.player = ap; useController = false; resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT } },
+                update = { it.player = ap; it.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT }
             )
             return@Surface
         }
@@ -306,8 +324,12 @@ fun PlayerSheet(vm: MainVM) {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { c -> PlayerView(c).apply { this.player = ap; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
-                    update = { it.player = ap }
+                    factory = { c -> PlayerView(c).apply {
+                        this.player = ap; keepScreenOn = true
+                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setFullscreenButtonClickListener { full = !full }
+                    } },
+                    update = { it.player = ap; it.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT }
                 )
             }
             return@Surface
@@ -316,14 +338,18 @@ fun PlayerSheet(vm: MainVM) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).then(dragMod)) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { c -> PlayerView(c).apply { this.player = ap; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
-                    update = { it.player = ap }
+                    factory = { c -> PlayerView(c).apply {
+                        this.player = ap; keepScreenOn = true
+                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setFullscreenButtonClickListener { full = !full }
+                    } },
+                    update = { it.player = ap; it.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT }
                 )
-                if (info == null && error == null) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+                if (info == null && error == null && loadedFor != video.id) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
                 error?.let {
                     Column(Modifier.align(Alignment.Center).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(it, color = Color.White); Spacer(Modifier.height(8.dp))
-                        Button(onClick = { error = null; loadedFor = null; info?.let { i -> info = i } ?: run { /* retry resolve */ } }) { Text("Tekrar dene") }
+                        Button(onClick = { error = null; loadedFor = null; info = null; vm.currentStreamInfo = null }) { Text("Tekrar dene") }
                     }
                 }
                 Row(Modifier.align(Alignment.TopStart).padding(4.dp)) {

@@ -14,10 +14,12 @@ import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.linkhandler.LinkHandler
+import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.channel.ChannelInfoItem
@@ -37,6 +39,18 @@ object Repo {
     private val yt get() = ServiceList.YouTube
     private val idRegex = Regex("(?:v=|shorts/|youtu\\.be/|/embed/)([A-Za-z0-9_-]{11})")
     private val chRegex = Regex("(?:channel/|@)([A-Za-z0-9_-]+)")
+
+    private val infoCache = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, StreamInfo>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StreamInfo>?) = size > 14
+        }
+    )
+    private val prefetching = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val prefetchScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+    )
+    private var shortsToken: String? = null
+    private var shortsQuery: String = "#shorts"
 
     private fun thumbOf(item: Any): String = runCatching {
         item.javaClass.methods.firstOrNull { it.name == "getThumbnailUrl" && it.parameterCount == 0 }?.invoke(item) as? String
@@ -98,7 +112,7 @@ object Repo {
     suspend fun search(q: String): List<Video> = searchPage(q).videos
 
     suspend fun searchPage(q: String): SearchPage = withContext(Dispatchers.IO) {
-        runCatching {
+        val np = runCatching {
             val ex = yt.getSearchExtractor(q)
             ex.fetchPage()
             val items = ex.initialPage.items
@@ -108,7 +122,19 @@ object Repo {
                 playlists = items.filterIsInstance<PlaylistInfoItem>().map { it.toPlaylist() }.distinctBy { it.id },
                 nextPage = null, // NewPipe paging API differs across versions; InnerTube continuation used where available
             )
-        }.getOrDefault(SearchPage(emptyList(), emptyList(), emptyList(), null))
+        }.getOrElse { e ->
+            android.util.Log.w("CleanTube", "NewPipe search failed: ${e.javaClass.simpleName}: ${e.message}")
+            SearchPage(emptyList(), emptyList(), emptyList(), null)
+        }
+        if (np.videos.isNotEmpty() || np.channels.isNotEmpty() || np.playlists.isNotEmpty()) return@withContext np
+        // Giris gerektirmeyen InnerTube aramasi (WEB istemcisi)
+        runCatching {
+            val p = InnerTube.searchPublic(q)
+            SearchPage(p.videos, emptyList(), p.playlists, null)
+        }.getOrElse { e ->
+            android.util.Log.w("CleanTube", "InnerTube search failed: ${e.message}")
+            np
+        }
     }
 
     suspend fun searchAll(q: String): Triple<List<Video>, List<Channel>, List<PlaylistItem>> {
@@ -153,57 +179,72 @@ object Repo {
     suspend fun homeMore(page: Page): VideoPage = withContext(Dispatchers.IO) { VideoPage(emptyList(), null) }
 
     suspend fun shortsPage(): VideoPage = withContext(Dispatchers.IO) {
-        // Try InnerTube reels/shorts endpoints first
-        for (browseId in listOf("FEshorts", "FEmusic_shorts", "TAshorts")) {
-            val inner = runCatching { InnerTube.videos(browseId) }.getOrDefault(emptyList())
-            if (inner.isNotEmpty()) {
-                android.util.Log.i("CleanTube", "Shorts loaded from $browseId: ${inner.size}")
-                return@withContext VideoPage(inner.distinctBy { it.id }, null)
+        // 1) Giris gerektirmeyen InnerTube shorts aramasi (en guvenilir yol)
+        for (q in listOf("#shorts", "shorts", "kısa videolar")) {
+            val page = runCatching { InnerTube.searchPublic(q) }.getOrNull() ?: continue
+            val vids = page.videos.filter { it.isShort && !it.isLive }.ifEmpty {
+                page.videos.filter { !it.isLive && it.isShort }
+            }
+            android.util.Log.i("CleanTube", "Shorts '$q' -> ${vids.size}/${page.videos.size}")
+            if (vids.isNotEmpty()) {
+                shortsQuery = q
+                shortsToken = page.continuation
+                return@withContext VideoPage(vids.distinctBy { it.id }, null)
             }
         }
-        val queries = listOf("#shorts", "shorts", "kısa videolar", "YouTube Shorts popüler")
-        for (q in queries) {
-            val page = runCatching { searchPage(q) }.getOrDefault(SearchPage(emptyList(), emptyList(), emptyList(), null))
-            val all = page.videos.distinctBy { it.id }
-            android.util.Log.i("CleanTube", "Shorts query '$q' returned ${all.size}")
-            if (all.isEmpty()) continue
-            val filtered = all.filter {
-                val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
-                    .fold(0L) { total, part -> total * 60 + part }
-                seconds in 1..180 || it.isShort
-            }.distinctBy { it.id }
-            val vids = if (filtered.isNotEmpty()) filtered else all.take(30)
-            return@withContext VideoPage(vids, page.nextPage)
+        // 2) Public FEshorts yuzeyi
+        for (browseId in listOf("FEshorts", "FEmusic_shorts")) {
+            val page = runCatching { InnerTube.browsePublic(browseId) }.getOrNull() ?: continue
+            val vids = page.videos.filter { it.isShort && !it.isLive }
+            android.util.Log.i("CleanTube", "Shorts browse $browseId -> ${vids.size}")
+            if (vids.isNotEmpty()) { shortsToken = page.continuation; return@withContext VideoPage(vids, null) }
         }
-        // Last resort: InnerTube home or trending videos, prefer short ones
-        val innerHome = runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrDefault(emptyList())
-        val trending = runCatching { trendingPage().videos }.getOrDefault(emptyList())
-        val pool = (innerHome + trending).distinctBy { it.id }
-        val shortish = pool.filter {
-            val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
-                .fold(0L) { total, part -> total * 60 + part }
-            seconds in 1..180
-        }
-        val fallback = (shortish.ifEmpty { pool }).distinctBy { it.id }
-        android.util.Log.i("CleanTube", "Shorts fallback pool: ${fallback.size}")
-        VideoPage(fallback, null)
+        // 3) Son care: kisа sureli trending videolar
+        val pool = runCatching { trendingPage().videos }.getOrDefault(emptyList())
+            .filter { !it.isLive && it.durationText.isNotBlank() && it.durationText.split(":").size <= 2 }
+        android.util.Log.i("CleanTube", "Shorts fallback trending: ${pool.size}")
+        shortsToken = null
+        VideoPage(pool.distinctBy { it.id }, null)
     }
 
     suspend fun shorts(): List<Video> = shortsPage().videos
-    suspend fun shortsMore(page: Page): VideoPage = withContext(Dispatchers.IO) { VideoPage(emptyList(), null) }
+
+    val shortsHasMore: Boolean get() = shortsToken != null
+
+    /** Shorts akisinin devami (InnerTube arama continuation). */
+    suspend fun shortsMore(): VideoPage = withContext(Dispatchers.IO) {
+        val token = shortsToken ?: return@withContext VideoPage(emptyList(), null)
+        runCatching {
+            val p = InnerTube.searchPublic(shortsQuery, token)
+            shortsToken = p.continuation
+            VideoPage(p.videos.filter { it.isShort && !it.isLive }.distinctBy { it.id }, null)
+        }.getOrElse { shortsToken = null; VideoPage(emptyList(), null) }
+    }
 
     suspend fun resolve(id: String): StreamInfo = withContext(Dispatchers.IO) {
+        infoCache[id]?.let { return@withContext it }
         val url = "https://www.youtube.com/watch?v=$id"
-        runCatching {
+        val info = try {
             val lh = LinkHandler(url, url, id)
             val extractor = yt.getStreamExtractor(lh)
             extractor.fetchPage()
             StreamInfo.getInfo(extractor)
-        }.recoverCatching { StreamInfo.getInfo(yt, url) }
-         .recoverCatching { StreamInfo.getInfo(url) }
-         .getOrElse { e ->
-            android.util.Log.e("CleanTube", "resolve failed", e)
-            throw if (e is Exception) e else Exception(e.message ?: "Stream çözümlenemedi", e)
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            android.util.Log.e("CleanTube", "resolve failed for $id: ${t.javaClass.simpleName}: ${t.message}")
+            throw Exception(t.message ?: "Video açılamadı", t)
+        }
+        infoCache[id] = info
+        info
+    }
+
+    fun prefetch(ids: List<String>) {
+        ids.filter { it.length == 11 }.forEach { id ->
+            if (infoCache.containsKey(id) || !prefetching.add(id)) return@forEach
+            prefetchScope.launch {
+                runCatching { resolve(id) }
+                prefetching.remove(id)
+            }
         }
     }
 
@@ -223,7 +264,25 @@ object Repo {
     }
 
     suspend fun channelPage(channelIdOrUrl: String): ChannelPage = withContext(Dispatchers.IO) {
-        val info = ChannelInfo.getInfo(yt, channelUrl(channelIdOrUrl))
+        val url = channelUrl(channelIdOrUrl)
+        val info = runCatching {
+            val id = when {
+                channelIdOrUrl.startsWith("UC") -> channelIdOrUrl
+                else -> url.substringAfter("/channel/", "").substringBefore("/").substringBefore("?")
+            }
+            if (id.startsWith("UC") && id.length > 10) {
+                val lh = ListLinkHandler(url, url, id, emptyList(), "")
+                val ex = yt.getChannelExtractor(lh)
+                ex.fetchPage()
+                ChannelInfo.getInfo(ex)
+            } else {
+                ChannelInfo.getInfo(yt, url)
+            }
+        }.getOrElse { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            android.util.Log.w("CleanTube", "channel failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw Exception("Kanal açılamadı", e)
+        }
         val videos = relatedItemsOf(info, StreamInfoItem::class.java).mapNotNull { it.toVideo() }.distinctBy { it.id }
         ChannelPage(info, videos, null)
     }
@@ -248,10 +307,17 @@ object Repo {
 
     suspend fun commentsPage(videoId: String): CommentsPage = withContext(Dispatchers.IO) {
         runCatching {
-            val info = CommentsInfo.getInfo("https://www.youtube.com/watch?v=$videoId")
+            val url = "https://www.youtube.com/watch?v=$videoId"
+            val lh = ListLinkHandler(url, url, videoId, emptyList(), "")
+            val ex = yt.getCommentsExtractor(lh)
+            ex.fetchPage()
+            val info = CommentsInfo.getInfo(ex)
             val list = relatedItemsOf(info, CommentsInfoItem::class.java).mapIndexed { i, c -> c.toComment(i) }.filter { it.text.isNotBlank() }
             CommentsPage(list, null, info)
-        }.getOrDefault(CommentsPage(emptyList(), null, null))
+        }.getOrElse { e ->
+            android.util.Log.w("CleanTube", "comments failed: ${e.javaClass.simpleName}: ${e.message}")
+            CommentsPage(emptyList(), null, null)
+        }
     }
 
     suspend fun commentsMore(info: CommentsInfo, page: Page): CommentsPage = withContext(Dispatchers.IO) { CommentsPage(emptyList(), null, info) }
@@ -259,19 +325,24 @@ object Repo {
     data class PlaylistPage(val title: String, val videos: List<Video>, val nextPage: Page? = null)
 
     suspend fun playlistPage(idOrUrl: String): PlaylistPage = withContext(Dispatchers.IO) {
-        val url = when {
-            idOrUrl.startsWith("http") -> idOrUrl
-            idOrUrl.startsWith("RD") || idOrUrl.startsWith("PL") || idOrUrl.startsWith("UU") || idOrUrl.startsWith("OL") || idOrUrl.startsWith("VL") ->
-                "https://www.youtube.com/playlist?list=${idOrUrl.removePrefix("VL")}"
-            else -> "https://www.youtube.com/playlist?list=$idOrUrl"
+        val pid = when {
+            idOrUrl.startsWith("http") -> idOrUrl.substringAfter("list=").substringBefore("&").ifBlank { idOrUrl }
+            else -> idOrUrl.removePrefix("VL")
         }
+        val url = if (idOrUrl.startsWith("http")) idOrUrl else "https://www.youtube.com/playlist?list=$pid"
         runCatching {
-            val info = PlaylistInfo.getInfo(yt, url)
+            val lh = ListLinkHandler(url, url, pid, emptyList(), "")
+            val ex = yt.getPlaylistExtractor(lh)
+            ex.fetchPage()
+            val info = PlaylistInfo.getInfo(ex)
             val videos = runCatching {
                 info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }.distinctBy { it.id }
             }.getOrElse { relatedItemsOf(info, StreamInfoItem::class.java).mapNotNull { it.toVideo() }.distinctBy { it.id } }
             PlaylistPage(runCatching { info.name.orEmpty() }.getOrDefault("Playlist"), videos, null)
-        }.getOrDefault(PlaylistPage("Playlist", emptyList(), null))
+        }.getOrElse { e ->
+            android.util.Log.w("CleanTube", "playlist failed: ${e.javaClass.simpleName}: ${e.message}")
+            PlaylistPage("Playlist", emptyList(), null)
+        }
     }
 
     private fun List<VideoStream>.progressive() = filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && it.isUrl }
@@ -308,13 +379,35 @@ object Repo {
         }
     }.getOrDefault(emptyList())
 
-    private fun mediaItem(url: String, subs: List<SubtitleConfiguration>): MediaItem =
-        MediaItem.Builder().setUri(url).setSubtitleConfigurations(subs).build()
+    private fun mediaItem(url: String, subs: List<SubtitleConfiguration>, mediaId: String? = null): MediaItem =
+        MediaItem.Builder().setUri(url).setSubtitleConfigurations(subs).apply {
+            if (!mediaId.isNullOrBlank()) setMediaId(mediaId)
+        }.build()
 
-    fun buildSource(info: StreamInfo, maxHeight: Int, f: DataSource.Factory): MediaSource? = runCatching {
+    /** InnerTube fallback - eski Android/NewPipe hatalarinda dogrudan stream URL'leriyle oynat. */
+    suspend fun buildFallbackSource(videoId: String, maxHeight: Int, f: DataSource.Factory): MediaSource? = withContext(Dispatchers.IO) {
+        runCatching {
+            val streams = InnerTube.resolveStreams(videoId)
+            if (streams.isEmpty()) return@runCatching null
+            val live = streams.firstOrNull { it.isLive && it.url.contains(".m3u8") }
+            if (live != null) return@runCatching HlsMediaSource.Factory(f).createMediaSource(MediaItem.Builder().setUri(live.url).setMediaId(videoId).build())
+            val progressiveFactory = ProgressiveMediaSource.Factory(f)
+            // muxed (video+audio) progressive
+            val muxed = streams.filter { it.isVideo && it.height > 0 && (it.mime?.contains("mp4") == true || it.mime == null) && it.url.isNotBlank() }
+                .filter { it.height in 1..maxHeight }.maxByOrNull { it.height }
+                ?: streams.filter { it.isVideo && it.height > 0 && it.url.isNotBlank() }.maxByOrNull { it.height }
+            if (muxed != null) return@runCatching progressiveFactory.createMediaSource(MediaItem.Builder().setUri(muxed.url).setMediaId(videoId).build())
+            // any http url
+            val any = streams.firstOrNull { it.url.startsWith("http") }
+            if (any != null) return@runCatching progressiveFactory.createMediaSource(MediaItem.Builder().setUri(any.url).setMediaId(videoId).build())
+            null
+        }.getOrNull()
+    }
+
+    fun buildSource(info: StreamInfo, maxHeight: Int, f: DataSource.Factory, mediaId: String? = null): MediaSource? = runCatching {
         val progressiveFactory = ProgressiveMediaSource.Factory(f)
         val subs = subtitleConfigs(info)
-        fun source(url: String) = progressiveFactory.createMediaSource(mediaItem(url, subs))
+        fun source(url: String) = progressiveFactory.createMediaSource(mediaItem(url, subs, mediaId))
 
         val muxed = info.videoStreams.progressive()
             .filter { it.height in 1..maxHeight }
@@ -337,9 +430,9 @@ object Repo {
         }
 
         val dash = info.dashMpdUrl
-        if (!dash.isNullOrBlank()) return@runCatching DashMediaSource.Factory(f).createMediaSource(MediaItem.Builder().setUri(dash).setSubtitleConfigurations(subs).build())
+        if (!dash.isNullOrBlank()) return@runCatching DashMediaSource.Factory(f).createMediaSource(mediaItem(dash, subs, mediaId))
         val hls = info.hlsUrl
-        if (!hls.isNullOrBlank()) return@runCatching HlsMediaSource.Factory(f).createMediaSource(MediaItem.Builder().setUri(hls).setSubtitleConfigurations(subs).build())
+        if (!hls.isNullOrBlank()) return@runCatching HlsMediaSource.Factory(f).createMediaSource(mediaItem(hls, subs, mediaId))
         null
     }.getOrNull()
 }

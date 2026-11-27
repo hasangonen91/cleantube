@@ -87,6 +87,100 @@ object InnerTube {
 
     suspend fun playlistsPage(continuation: String? = null): BrowsePage = videosPage("FEplaylist_aggregation", continuation)
 
+    /** Giris gerektirmeyen genel arama (WEB istemcisi, cerezsiz). */
+    suspend fun searchPublic(query: String, continuation: String? = null): BrowsePage = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+        if (continuation != null) payload.put("continuation", continuation) else payload.put("query", query)
+        val root = publicRequest("search", payload)
+        val vids = LinkedHashMap<String, Video>()
+        val pls = LinkedHashMap<String, PlaylistItem>()
+        collect(root, vids, pls)
+        BrowsePage(vids.values.toList(), pls.values.toList(), findContinuation(root))
+    }
+
+    /** Giris gerektirmeyen genel browse (or. FEshorts / FEwhat_to_watch). */
+    suspend fun browsePublic(browseId: String, continuation: String? = null): BrowsePage = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+        if (continuation != null) payload.put("continuation", continuation) else payload.put("browseId", browseId)
+        val root = publicRequest("browse", payload)
+        val vids = LinkedHashMap<String, Video>()
+        val pls = LinkedHashMap<String, PlaylistItem>()
+        collect(root, vids, pls)
+        BrowsePage(vids.values.toList(), pls.values.toList(), findContinuation(root))
+    }
+
+    private suspend fun publicRequest(endpoint: String, payload: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        val ver = clientVersion()
+        val ctx = JSONObject().put(
+            "client", JSONObject().put("clientName", "WEB").put("clientVersion", ver).put("hl", "tr").put("gl", "TR")
+        )
+        payload.put("context", ctx)
+        val body = payload.toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$O/youtubei/v1/$endpoint?prettyPrint=false").post(body)
+            .header("User-Agent", UA)
+            .header("X-Origin", O).header("Origin", O).header("Referer", "$O/")
+            .header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", ver)
+            .build()
+        client.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) error("Sunucu hatası (${r.code})")
+            JSONObject(r.body?.string().orEmpty())
+        }
+    }
+
+    data class ResolvedStream(val url: String, val mime: String?, val isVideo: Boolean, val height: Int, val isLive: Boolean)
+
+    /** NewPipe basarisiz oldugunda (eski Android/NoSuchMethodError vb.) dogrudan player endpoint'i kullan. */
+    suspend fun resolveStreams(videoId: String): List<ResolvedStream> = withContext(Dispatchers.IO) {
+        val ver = clientVersion()
+        val payload = JSONObject()
+            .put("videoId", videoId)
+            .put("contentCheckOk", true)
+            .put("racyCheckOk", true)
+            .put("context", JSONObject().put("client", JSONObject()
+                .put("clientName", "ANDROID")
+                .put("clientVersion", "19.44.38")
+                .put("androidSdkVersion", 30)
+                .put("hl", "tr").put("gl", "TR")))
+        val body = payload.toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$O/youtubei/v1/player?prettyPrint=false").post(body)
+            .header("User-Agent", "com.google.android.youtube/19.44.38 (Linux; U; Android 11) gzip")
+            .header("X-Youtube-Client-Name", "3")
+            .header("X-Youtube-Client-Version", "19.44.38")
+            .header("Content-Type", "application/json")
+            .build()
+        client.newCall(req).execute().use { r ->
+            val root = JSONObject(r.body?.string().orEmpty())
+            val playability = root.optJSONObject("playabilityStatus")
+            val status = playability?.optString("status").orEmpty()
+            if (status.isNotBlank() && status != "OK") {
+                val reason = playability?.optString("reason").orEmpty()
+                if (reason.isNotBlank()) error(reason)
+            }
+            val streaming = root.optJSONObject("streamingData") ?: return@withContext emptyList()
+            val isLive = streaming.has("hlsManifestUrl")
+            val out = ArrayList<ResolvedStream>()
+            val hls = streaming.optString("hlsManifestUrl").orEmpty()
+            if (hls.isNotBlank()) out.add(ResolvedStream(hls, "application/x-mpegURL", true, 0, true))
+            fun addFmt(arr: JSONArray?, isVideo: Boolean) {
+                if (arr == null) return
+                for (i in 0 until arr.length()) {
+                    val f = arr.optJSONObject(i) ?: continue
+                    val url = f.optString("url").orEmpty()
+                    if (url.isBlank()) continue
+                    val mime = f.optString("mimeType").orEmpty()
+                    val h = f.optInt("height", 0)
+                    out.add(ResolvedStream(url, mime, isVideo, h, isLive))
+                }
+            }
+            addFmt(streaming.optJSONArray("formats"), true)
+            addFmt(streaming.optJSONArray("adaptiveFormats"), true)
+            // mark audio-only
+            return@withContext out.map { s ->
+                if (s.mime?.startsWith("audio/") == true) s.copy(isVideo = false, height = 0) else s
+            }
+        }
+    }
+
     private suspend fun post(endpoint: String, payload: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         val cookie = Auth.cookies ?: error("Giriş yapılmadı")
         val ver = clientVersion()
@@ -138,6 +232,9 @@ object InnerTube {
         when (node) {
             is JSONArray -> for (i in 0 until node.length()) collect(node.opt(i), vids, pls)
             is JSONObject -> {
+                // Shorts shelf ogesi (yeni WEB yaniti)
+                node.optJSONObject("shortsLockupViewModel")?.let { parseShortsLockup(it, vids) }
+                node.optJSONObject("reelItemRenderer")?.let { parseReelItem(it, vids) }
                 val id = node.optString("videoId")
                 if (id.length == 11 && node.has("title")) {
                     val t = txt(node.opt("title"))
@@ -186,6 +283,26 @@ object InnerTube {
                 }
             }
         }
+    }
+
+    private fun parseShortsLockup(x: JSONObject, vids: MutableMap<String, Video>) {
+        val cmd = x.optJSONObject("onTap")?.optJSONObject("innertubeCommand")
+        var id = cmd?.optJSONObject("reelWatchEndpoint")?.optString("videoId").orEmpty()
+        if (id.length != 11) id = x.optString("entityId").substringAfterLast("-")
+        if (id.length != 11) return
+        val ov = x.optJSONObject("overlayMetadata")
+        val title = ov?.optJSONObject("primaryText")?.optString("content").orEmpty()
+        if (title.isBlank()) return
+        val views = ov?.optJSONObject("secondaryText")?.optString("content").orEmpty()
+        vids.putIfAbsent(id, Video(id = id, title = title, views = views, isShort = true))
+    }
+
+    private fun parseReelItem(x: JSONObject, vids: MutableMap<String, Video>) {
+        val id = x.optString("videoId")
+        if (id.length != 11) return
+        val title = txt(x.opt("headline")).ifBlank { txt(x.opt("title")) }
+        if (title.isBlank()) return
+        vids.putIfAbsent(id, Video(id = id, title = title, views = txt(x.opt("viewCountText")), isShort = true))
     }
 
     private fun gatherText(node: Any?, out: MutableList<String>) {
