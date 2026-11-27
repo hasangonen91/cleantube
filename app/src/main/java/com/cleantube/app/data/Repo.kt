@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.Page
+import org.schabi.newpipe.extractor.linkhandler.LinkHandler
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.channel.ChannelInfoItem
@@ -190,11 +191,18 @@ object Repo {
     suspend fun shortsMore(page: Page): VideoPage = withContext(Dispatchers.IO) { VideoPage(emptyList(), null) }
 
     suspend fun resolve(id: String): StreamInfo = withContext(Dispatchers.IO) {
-        runCatching { StreamInfo.getInfo("https://www.youtube.com/watch?v=$id") }
-            .getOrElse { e ->
-                android.util.Log.e("CleanTube", "resolve failed", e)
-                throw if (e is Exception) e else Exception(e.message ?: "Stream çözümlenemedi", e)
-            }
+        val url = "https://www.youtube.com/watch?v=$id"
+        runCatching {
+            val lh = LinkHandler(url, url, id)
+            val extractor = yt.getStreamExtractor(lh)
+            extractor.fetchPage()
+            StreamInfo.getInfo(extractor)
+        }.recoverCatching { StreamInfo.getInfo(yt, url) }
+         .recoverCatching { StreamInfo.getInfo(url) }
+         .getOrElse { e ->
+            android.util.Log.e("CleanTube", "resolve failed", e)
+            throw if (e is Exception) e else Exception(e.message ?: "Stream çözümlenemedi", e)
+        }
     }
 
     private fun <T> relatedItemsOf(obj: Any, cls: Class<T>): List<T> = runCatching {
