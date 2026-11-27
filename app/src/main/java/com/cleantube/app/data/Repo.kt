@@ -190,7 +190,11 @@ object Repo {
     suspend fun shortsMore(page: Page): VideoPage = withContext(Dispatchers.IO) { VideoPage(emptyList(), null) }
 
     suspend fun resolve(id: String): StreamInfo = withContext(Dispatchers.IO) {
-        StreamInfo.getInfo("https://www.youtube.com/watch?v=$id")
+        runCatching { StreamInfo.getInfo("https://www.youtube.com/watch?v=$id") }
+            .getOrElse { e ->
+                android.util.Log.e("CleanTube", "resolve failed", e)
+                throw if (e is Exception) e else Exception(e.message ?: "Stream çözümlenemedi", e)
+            }
     }
 
     private fun <T> relatedItemsOf(obj: Any, cls: Class<T>): List<T> = runCatching {
