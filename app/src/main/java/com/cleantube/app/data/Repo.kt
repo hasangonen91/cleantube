@@ -152,20 +152,38 @@ object Repo {
     suspend fun homeMore(page: Page): VideoPage = withContext(Dispatchers.IO) { VideoPage(emptyList(), null) }
 
     suspend fun shortsPage(): VideoPage = withContext(Dispatchers.IO) {
-        val queries = listOf("shorts", "#shorts", "YouTube Shorts popüler")
+        // Try InnerTube reels/shorts endpoints first
+        for (browseId in listOf("FEshorts", "FEmusic_shorts", "TAshorts")) {
+            val inner = runCatching { InnerTube.videos(browseId) }.getOrDefault(emptyList())
+            if (inner.isNotEmpty()) {
+                android.util.Log.i("CleanTube", "Shorts loaded from $browseId: ${inner.size}")
+                return@withContext VideoPage(inner.distinctBy { it.id }, null)
+            }
+        }
+        val queries = listOf("#shorts", "shorts", "kısa videolar", "YouTube Shorts popüler")
         for (q in queries) {
             val page = runCatching { searchPage(q) }.getOrDefault(SearchPage(emptyList(), emptyList(), emptyList(), null))
             val all = page.videos.distinctBy { it.id }
+            android.util.Log.i("CleanTube", "Shorts query '$q' returned ${all.size}")
             if (all.isEmpty()) continue
             val filtered = all.filter {
                 val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
                     .fold(0L) { total, part -> total * 60 + part }
-                seconds in 1..120 || it.isShort
+                seconds in 1..180 || it.isShort
             }.distinctBy { it.id }
-            val vids = if (filtered.isNotEmpty()) filtered else all.take(20)
+            val vids = if (filtered.isNotEmpty()) filtered else all.take(30)
             return@withContext VideoPage(vids, page.nextPage)
         }
-        VideoPage(emptyList(), null)
+        // Last resort: trending/home videos, prefer short ones
+        val trending = runCatching { trendingPage().videos }.getOrDefault(emptyList())
+        val shortish = trending.filter {
+            val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
+                .fold(0L) { total, part -> total * 60 + part }
+            seconds in 1..180
+        }
+        val fallback = (shortish.ifEmpty { trending }).distinctBy { it.id }
+        android.util.Log.i("CleanTube", "Shorts fallback trending: ${fallback.size}")
+        VideoPage(fallback, null)
     }
 
     suspend fun shorts(): List<Video> = shortsPage().videos
