@@ -170,7 +170,7 @@ class MainVM : ViewModel() {
         if (shorts.isNotEmpty()) return@launch
         shortsLoading = true; shortsNextPage = null; shortsError = null
         try { val p = Repo.shortsPage(); shorts = p.videos; shortsNextPage = p.nextPage; if (shorts.isEmpty()) shortsError = "Shorts bulunamadı" }
-        catch (e: Exception) { shorts = emptyList(); shortsError = e.message ?: "Shorts yüklenemedi" }
+        catch (t: Throwable) { if (t is kotlinx.coroutines.CancellationException) throw t; shorts = emptyList(); shortsError = t.message ?: "Shorts yüklenemedi" }
         shortsLoading = false
     }
 

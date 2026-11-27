@@ -175,15 +175,17 @@ object Repo {
             val vids = if (filtered.isNotEmpty()) filtered else all.take(30)
             return@withContext VideoPage(vids, page.nextPage)
         }
-        // Last resort: trending/home videos, prefer short ones
+        // Last resort: InnerTube home or trending videos, prefer short ones
+        val innerHome = runCatching { InnerTube.videos("FEwhat_to_watch") }.getOrDefault(emptyList())
         val trending = runCatching { trendingPage().videos }.getOrDefault(emptyList())
-        val shortish = trending.filter {
+        val pool = (innerHome + trending).distinctBy { it.id }
+        val shortish = pool.filter {
             val seconds = it.durationText.split(":").mapNotNull(String::toIntOrNull)
                 .fold(0L) { total, part -> total * 60 + part }
             seconds in 1..180
         }
-        val fallback = (shortish.ifEmpty { trending }).distinctBy { it.id }
-        android.util.Log.i("CleanTube", "Shorts fallback trending: ${fallback.size}")
+        val fallback = (shortish.ifEmpty { pool }).distinctBy { it.id }
+        android.util.Log.i("CleanTube", "Shorts fallback pool: ${fallback.size}")
         VideoPage(fallback, null)
     }
 

@@ -12,7 +12,10 @@ import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -48,6 +51,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -265,7 +270,30 @@ fun PlayerSheet(vm: MainVM) {
     }
 
     val inPip = activity?.isInPictureInPictureMode == true
-    Surface(Modifier.fillMaxSize(), color = if (inPip) Color.Black else MaterialTheme.colorScheme.background) {
+    val dragOffset = remember { Animatable(0f) }
+    val dragScope = rememberCoroutineScope()
+    fun settleDrag() {
+        dragScope.launch {
+            if (dragOffset.value > 220f) { vm.minimizePlayer(); dragOffset.snapTo(0f) }
+            else dragOffset.animateTo(0f, tween(180))
+        }
+    }
+    val dragMod = Modifier.pointerInput(full, inPip) {
+        if (full || inPip) return@pointerInput
+        detectVerticalDragGestures(
+            onDragEnd = { settleDrag() },
+            onDragCancel = { dragScope.launch { dragOffset.animateTo(0f, tween(180)) } },
+            onVerticalDrag = { _, delta ->
+                val next = (dragOffset.value + delta).coerceAtLeast(0f)
+                dragScope.launch { dragOffset.snapTo(next) }
+            }
+        )
+    }
+    Surface(
+        Modifier.fillMaxSize()
+            .graphicsLayer { translationY = dragOffset.value; alpha = (1f - (dragOffset.value / 1400f)).coerceIn(0.55f, 1f) },
+        color = if (inPip) Color.Black else MaterialTheme.colorScheme.background
+    ) {
         if (inPip) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -285,7 +313,7 @@ fun PlayerSheet(vm: MainVM) {
             return@Surface
         }
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).then(dragMod)) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { c -> PlayerView(c).apply { this.player = ap; keepScreenOn = true; setFullscreenButtonClickListener { full = !full } } },
