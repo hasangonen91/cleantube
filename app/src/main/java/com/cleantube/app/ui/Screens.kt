@@ -273,7 +273,7 @@ fun ShortsScreen(vm: MainVM) {
     VerticalPager(
         state = pager,
         modifier = Modifier.fillMaxSize().background(Color.Black),
-        beyondViewportPageCount = 1,
+        beyondBoundsPageCount = 1,
         key = { items.getOrNull(it)?.id ?: it },
     ) { page ->
         val video = items.getOrNull(page) ?: return@VerticalPager
